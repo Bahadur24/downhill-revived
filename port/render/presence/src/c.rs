@@ -26,7 +26,10 @@ unsafe fn text<'a>(p: *const c_char) -> &'a str {
 /// # Safety
 /// `setting` is NULL or a NUL-terminated string; `log` is callable from any thread as declared.
 #[no_mangle]
-pub unsafe extern "C" fn dhd_presence_start(setting: *const c_char, log: Option<DhdPresenceLog>) -> c_int {
+pub unsafe extern "C" fn dhd_presence_start(
+    setting: *const c_char,
+    log: Option<DhdPresenceLog>,
+) -> c_int {
     // SAFETY: the caller's contract.
     let setting = (!setting.is_null()).then(|| unsafe { text(setting) });
     if cfg!(target_os = "android") || !enabled(setting) {

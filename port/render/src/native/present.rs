@@ -94,7 +94,12 @@ pub struct Presenter {
 
 impl Presenter {
     pub fn new() -> Presenter {
-        Presenter { uniform: None, sampler: None, group: None, fill: None }
+        Presenter {
+            uniform: None,
+            sampler: None,
+            group: None,
+            fill: None,
+        }
     }
 }
 
@@ -123,7 +128,11 @@ fn uniform(gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Uniform {
             }),
         }],
     });
-    Uniform { buffer, group, written: None }
+    Uniform {
+        buffer,
+        group,
+        written: None,
+    }
 }
 
 /// native_present_options' sampler: clamp to edge, `filter` for magnification and minification,
@@ -151,7 +160,14 @@ fn scissor(cut: [i32; 4], w: u32, h: u32) -> Option<(u32, u32, u32, u32)> {
     let (w, h) = (w.min(i32::MAX as u32) as i32, h.min(i32::MAX as u32) as i32);
     let (left, top) = (cut[0].max(0), cut[1].max(0));
     let (right, bottom) = (cut[2].min(w), cut[3].min(h));
-    (right > left && bottom > top).then(|| (left as u32, top as u32, (right - left) as u32, (bottom - top) as u32))
+    (right > left && bottom > top).then(|| {
+        (
+            left as u32,
+            top as u32,
+            (right - left) as u32,
+            (bottom - top) as u32,
+        )
+    })
 }
 
 /// native.wgsl's `Present` (rect, cover, source; each x, y, width, height), little-endian f32.
@@ -173,15 +189,29 @@ fn fill_rects(rect: [f32; 4], cut: [i32; 4], w: u32, h: u32) -> ([f32; 4], [f32;
         return ([0.0; 4], [0.0; 4]);
     }
     let k = (w as f32 / cw).max(h as f32 / ch);
-    let cover = [(w as f32 - cw * k) / 2.0, (h as f32 - ch * k) / 2.0, cw * k, ch * k];
-    let source = [(cut[0] as f32 - rect[0]) / rect[2], (cut[1] as f32 - rect[1]) / rect[3], cw / rect[2], ch / rect[3]];
+    let cover = [
+        (w as f32 - cw * k) / 2.0,
+        (h as f32 - ch * k) / 2.0,
+        cw * k,
+        ch * k,
+    ];
+    let source = [
+        (cut[0] as f32 - rect[0]) / rect[2],
+        (cut[1] as f32 - rect[1]) / rect[3],
+        cw / rect[2],
+        ch / rect[3],
+    ];
     (cover, source)
 }
 
 fn fill_objects(gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Fill {
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: Some("native present fill"),
-        size: wgpu::Extent3d { width: FILL_SIZE.0, height: FILL_SIZE.1, depth_or_array_layers: 1 },
+        size: wgpu::Extent3d {
+            width: FILL_SIZE.0,
+            height: FILL_SIZE.1,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -192,18 +222,34 @@ fn fill_objects(gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Fill {
     let small = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let sampler = sampler(gpu, wgpu::FilterMode::Linear);
     let small_group = texture_group(gpu, layout, &small, &sampler, "native present fill");
-    Fill { small, sampler, small_group, source_group: None }
+    Fill {
+        small,
+        sampler,
+        small_group,
+        source_group: None,
+    }
 }
 
 /// A view and a sampler on `init.rs`'s texture layout.
-fn texture_group(gpu: &Gpu, layout: &wgpu::BindGroupLayout, view: &wgpu::TextureView, sampler: &wgpu::Sampler,
-                 label: &str) -> wgpu::BindGroup {
+fn texture_group(
+    gpu: &Gpu,
+    layout: &wgpu::BindGroupLayout,
+    view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+    label: &str,
+) -> wgpu::BindGroup {
     gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some(label),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
         ],
     })
 }
@@ -217,7 +263,9 @@ impl Native {
         let gpu = self.gpu;
         let log = |e: &str| crate::host::log(&format!("dhd_render: dhdr_native_present: {e}"));
         // No picture scanned out yet: nothing to show.
-        let Some(display) = self.display.view().cloned() else { return 0 };
+        let Some(display) = self.display.view().cloned() else {
+            return 0;
+        };
         let objects = &self.objects;
         let p = &mut self.presenter;
         let Some(uniform) = p.uniform.as_mut() else {
@@ -246,30 +294,58 @@ impl Native {
             }
         };
         // The frame's size (the configured one; the surface clamps it to the device's limit).
-        let (w, h) = surface.frame_texture().map_or((r.window_w, r.window_h), |t| (t.width(), t.height()));
+        let (w, h) = surface
+            .frame_texture()
+            .map_or((r.window_w, r.window_h), |t| (t.width(), t.height()));
         let cut = scissor(r.cut, w, h);
         // The fill only where the picture leaves some of the frame uncovered.
         let fill = r.fill != 0 && cut.is_some_and(|c| c != (0, 0, w, h));
         if fill {
-            let fill = p.fill.get_or_insert_with(|| fill_objects(gpu, &objects.texture_layout));
-            if fill.source_group.as_ref().is_none_or(|(view, _)| *view != display) {
-                let group = texture_group(gpu, &objects.texture_layout, &display, &fill.sampler, "native present fill source");
+            let fill = p
+                .fill
+                .get_or_insert_with(|| fill_objects(gpu, &objects.texture_layout));
+            if fill
+                .source_group
+                .as_ref()
+                .is_none_or(|(view, _)| *view != display)
+            {
+                let group = texture_group(
+                    gpu,
+                    &objects.texture_layout,
+                    &display,
+                    &fill.sampler,
+                    "native present fill source",
+                );
                 fill.source_group = Some((display.clone(), group));
             }
         }
         if p.group.as_ref().is_none_or(|(view, _)| *view != display) {
-            let group = texture_group(gpu, &objects.texture_layout, &display, sampler, "native present");
+            let group = texture_group(
+                gpu,
+                &objects.texture_layout,
+                &display,
+                sampler,
+                "native present",
+            );
             p.group = Some((display, group));
         }
         let group = &p.group.as_ref().expect("present bind group").1;
-        let (cover, source) = if fill { fill_rects(r.rect, r.cut, w, h) } else { ([0.0; 4], [0.0; 4]) };
+        let (cover, source) = if fill {
+            fill_rects(r.rect, r.cut, w, h)
+        } else {
+            ([0.0; 4], [0.0; 4])
+        };
         let bytes = uniform_bytes([r.rect, cover, source]);
         if uniform.written != Some(bytes) {
             gpu.queue.write_buffer(&uniform.buffer, 0, &bytes);
             uniform.written = Some(bytes);
         }
-        let mut separate = (!self.pass.deferred).then(|| gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("native present") }));
+        let mut separate = (!self.pass.deferred).then(|| {
+            gpu.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("native present"),
+                })
+        });
         let encoder = match separate.as_mut() {
             Some(encoder) => encoder,
             None => self.pass.encoder(gpu),
@@ -284,7 +360,10 @@ impl Native {
                     view: &f.small,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
@@ -293,7 +372,11 @@ impl Native {
             });
             pass.set_pipeline(shrink);
             pass.set_bind_group(0, &uniform.group, &[0]);
-            pass.set_bind_group(1, &f.source_group.as_ref().expect("fill source group").1, &[]);
+            pass.set_bind_group(
+                1,
+                &f.source_group.as_ref().expect("fill source group").1,
+                &[],
+            );
             pass.draw(0..3, 0..1);
         }
         let times = gputimes::slot(gpu, gputimes::PRESENT);
@@ -306,7 +389,12 @@ impl Native {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }),
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -361,7 +449,11 @@ impl Native {
         if p.uniform.is_none() {
             p.uniform = Some(uniform(gpu, &self.objects.uniform_layout));
         }
-        let filter = if flags & DHDR_NATIVE_POINT_FILTER != 0 { wgpu::FilterMode::Nearest } else { wgpu::FilterMode::Linear };
+        let filter = if flags & DHDR_NATIVE_POINT_FILTER != 0 {
+            wgpu::FilterMode::Nearest
+        } else {
+            wgpu::FilterMode::Linear
+        };
         p.sampler = Some(sampler(gpu, filter));
         p.group = None;
     }
@@ -373,15 +465,25 @@ mod tests {
 
     #[test]
     fn scissor_clamps_to_the_frame() {
-        assert_eq!(scissor([-5, -3, 700, 500], 640, 480), Some((0, 0, 640, 480)));
-        assert_eq!(scissor([80, 0, 560, 480], 640, 480), Some((80, 0, 480, 480)));
+        assert_eq!(
+            scissor([-5, -3, 700, 500], 640, 480),
+            Some((0, 0, 640, 480))
+        );
+        assert_eq!(
+            scissor([80, 0, 560, 480], 640, 480),
+            Some((80, 0, 480, 480))
+        );
         assert_eq!(scissor([640, 0, 700, 480], 640, 480), None);
         assert_eq!(scissor([10, 10, 10, 20], 640, 480), None);
     }
 
     #[test]
     fn uniform_is_little_endian_f32() {
-        let b = uniform_bytes([[1.0, 2.0, 640.0, 480.0], [0.0, -60.0, 1280.0, 960.0], [0.0, 0.25, 1.0, 0.5]]);
+        let b = uniform_bytes([
+            [1.0, 2.0, 640.0, 480.0],
+            [0.0, -60.0, 1280.0, 960.0],
+            [0.0, 0.25, 1.0, 0.5],
+        ]);
         assert_eq!(&b[0..4], &1.0f32.to_le_bytes());
         assert_eq!(&b[12..16], &480.0f32.to_le_bytes());
         assert_eq!(&b[20..24], &(-60.0f32).to_le_bytes());
@@ -392,13 +494,18 @@ mod tests {
     fn fill_covers_the_frame() {
         // a 4:3 picture in the middle of a 16:9 frame: the fill is it 4/3 as large, its top and
         // bottom eighths outside the frame; the source is the whole picture
-        let (cover, source) = fill_rects([160.0, 0.0, 960.0, 720.0], [160, 0, 1120, 720], 1280, 720);
+        let (cover, source) =
+            fill_rects([160.0, 0.0, 960.0, 720.0], [160, 0, 1120, 720], 1280, 720);
         assert_eq!(cover, [0.0, -120.0, 1280.0, 960.0]);
         assert_eq!(source, [0.0, 0.0, 1.0, 1.0]);
         // a movie's rows cut from a taller picture
-        let (cover, source) = fill_rects([0.0, -100.0, 1000.0, 700.0], [0, 0, 1000, 500], 2400, 1080);
+        let (cover, source) =
+            fill_rects([0.0, -100.0, 1000.0, 700.0], [0, 0, 1000, 500], 2400, 1080);
         assert_eq!(cover, [0.0, -60.0, 2400.0, 1200.0]);
         assert_eq!(source, [0.0, 100.0 / 700.0, 1.0, 500.0 / 700.0]);
-        assert_eq!(fill_rects([0.0; 4], [5, 5, 5, 9], 640, 480), ([0.0; 4], [0.0; 4]));
+        assert_eq!(
+            fill_rects([0.0; 4], [5, 5, 5, 9], 640, 480),
+            ([0.0; 4], [0.0; 4])
+        );
     }
 }

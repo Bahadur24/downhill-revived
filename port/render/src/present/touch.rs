@@ -5,8 +5,8 @@
 //! boxes, the trick stick's sectors, the PS2 symbols, chevrons, stripes) or as a character of the
 //! 8x8 font (`font8x8.rs`). Nothing here reads the game or the environment.
 
-use crate::device::Gpu;
 use super::font8x8;
+use crate::device::Gpu;
 
 /// Floats per shape: kind, x, y, a, b, c, d, 0, fill rgba, line rgba (C's `dhdr_surface_touch`).
 pub const ITEM_FLOATS: usize = 16;
@@ -37,7 +37,8 @@ impl TouchOverlay {
     /// The shapes for the next pictures (an empty list hides the overlay); the screen in mm.
     pub fn set(&mut self, items: &[f32], width_mm: f32, height_mm: f32) {
         self.items.clear();
-        self.items.extend_from_slice(&items[..items.len() / ITEM_FLOATS * ITEM_FLOATS]);
+        self.items
+            .extend_from_slice(&items[..items.len() / ITEM_FLOATS * ITEM_FLOATS]);
         self.width_mm = width_mm;
         self.height_mm = height_mm;
     }
@@ -45,21 +46,39 @@ impl TouchOverlay {
     /// The shapes' instances and the screen uniform on the GPU for a w x h frame (each written
     /// only when it changed); the number of shapes to draw, or None when there are none.
     fn prepare(&mut self, gpu: &Gpu, format: wgpu::TextureFormat, w: u32, h: u32) -> Option<u32> {
-        if self.items.is_empty() || w == 0 || h == 0 || self.width_mm <= 0.0 || self.height_mm <= 0.0 { return None; }
-        let o = self.objects.get_or_insert_with(|| Objects::new(gpu, format));
+        if self.items.is_empty()
+            || w == 0
+            || h == 0
+            || self.width_mm <= 0.0
+            || self.height_mm <= 0.0
+        {
+            return None;
+        }
+        let o = self
+            .objects
+            .get_or_insert_with(|| Objects::new(gpu, format));
         let count = (self.items.len() / ITEM_FLOATS) as u64;
         if count * ITEM_BYTES > o.capacity {
             o.capacity = (count * ITEM_BYTES).next_power_of_two();
-            o.instances = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("touch overlay shapes"), size: o.capacity,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-            self.written.0.clear();  /* a new buffer holds nothing yet */
+            o.instances = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("touch overlay shapes"),
+                size: o.capacity,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.written.0.clear(); /* a new buffer holds nothing yet */
         }
         if self.written.0 != self.items {
             let bytes: Vec<u8> = self.items.iter().flat_map(|f| f.to_le_bytes()).collect();
             gpu.queue.write_buffer(&o.instances, 0, &bytes);
             self.written.0.clone_from(&self.items);
         }
-        let uniforms = [w as f32, h as f32, w as f32 / self.width_mm, h as f32 / self.height_mm];
+        let uniforms = [
+            w as f32,
+            h as f32,
+            w as f32 / self.width_mm,
+            h as f32 / self.height_mm,
+        ];
         if self.written.1 != uniforms {
             let ub: Vec<u8> = uniforms.iter().flat_map(|f| f.to_le_bytes()).collect();
             gpu.queue.write_buffer(&o.uniforms, 0, &ub);
@@ -69,7 +88,9 @@ impl TouchOverlay {
     }
 
     fn record(&self, pass: &mut wgpu::RenderPass<'_>, count: u32) {
-        let Some(o) = self.objects.as_ref() else { return };
+        let Some(o) = self.objects.as_ref() else {
+            return;
+        };
         pass.set_pipeline(&o.pipe);
         pass.set_bind_group(0, &o.group, &[]);
         pass.set_vertex_buffer(0, o.instances.slice(..count as u64 * ITEM_BYTES));
@@ -80,7 +101,14 @@ impl TouchOverlay {
     /// renderer's present pass, finding 146): the same pixels as `draw`'s pass of its own after
     /// it, without a second command buffer, submission and load and store of the whole frame.
     /// The next `draw` (dhdr_surface_present's) skips it.
-    pub fn draw_in_pass(&mut self, gpu: &Gpu, pass: &mut wgpu::RenderPass<'_>, format: wgpu::TextureFormat, w: u32, h: u32) {
+    pub fn draw_in_pass(
+        &mut self,
+        gpu: &Gpu,
+        pass: &mut wgpu::RenderPass<'_>,
+        format: wgpu::TextureFormat,
+        w: u32,
+        h: u32,
+    ) {
         if let Some(count) = self.prepare(gpu, format, w, h) {
             pass.set_scissor_rect(0, 0, w, h);
             self.record(pass, count);
@@ -88,16 +116,41 @@ impl TouchOverlay {
         }
     }
 
-    pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, format: wgpu::TextureFormat, w: u32, h: u32) {
-        if std::mem::take(&mut self.drawn) { return; }
-        let Some(count) = self.prepare(gpu, format, w, h) else { return };
-        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("touch overlay") });
+    pub fn draw(
+        &mut self,
+        gpu: &Gpu,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        w: u32,
+        h: u32,
+    ) {
+        if std::mem::take(&mut self.drawn) {
+            return;
+        }
+        let Some(count) = self.prepare(gpu, format, w, h) else {
+            return;
+        };
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("touch overlay"),
+            });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("touch overlay"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
-                depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
             });
             self.record(&mut pass, count);
         }
@@ -107,44 +160,126 @@ impl TouchOverlay {
 
 impl Objects {
     fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
-        let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("touch overlay"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
+        let shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("touch overlay"),
+                source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            });
         let attributes = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
-        let pipe = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("touch overlay"), layout: None,
-            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout { array_stride: ITEM_BYTES, step_mode: wgpu::VertexStepMode::Instance, attributes: &attributes }] },
-            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
-            primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
-        });
+        let pipe = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("touch overlay"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: ITEM_BYTES,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &attributes,
+                    }],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
         // The font: the 95 glyphs side by side, one byte a pixel.
         let (fw, fh) = (8 * font8x8::COUNT as u32, 8u32);
         let mut pixels = vec![0u8; (fw * fh) as usize];
         for (g, rows) in font8x8::GLYPHS.iter().enumerate() {
             for (y, row) in rows.iter().enumerate() {
                 for x in 0..8 {
-                    if row & (1 << x) != 0 { pixels[y * fw as usize + g * 8 + x] = 255; }
+                    if row & (1 << x) != 0 {
+                        pixels[y * fw as usize + g * 8 + x] = 255;
+                    }
                 }
             }
         }
         let font = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("touch overlay font"), size: wgpu::Extent3d { width: fw, height: fh, depth_or_array_layers: 1 },
-            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
+            label: Some("touch overlay font"),
+            size: wgpu::Extent3d {
+                width: fw,
+                height: fh,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
-        gpu.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &font, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &pixels, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(fw), rows_per_image: Some(fh) },
-            wgpu::Extent3d { width: fw, height: fh, depth_or_array_layers: 1 });
-        let uniforms = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("touch overlay screen"), size: 16,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("touch overlay"), layout: &pipe.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: uniforms.as_entire_binding() },
-                       wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&font.create_view(&Default::default())) }] });
+        gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &font,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(fw),
+                rows_per_image: Some(fh),
+            },
+            wgpu::Extent3d {
+                width: fw,
+                height: fh,
+                depth_or_array_layers: 1,
+            },
+        );
+        let uniforms = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("touch overlay screen"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("touch overlay"),
+            layout: &pipe.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        &font.create_view(&Default::default()),
+                    ),
+                },
+            ],
+        });
         let capacity = 256 * ITEM_BYTES;
-        let instances = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("touch overlay shapes"), size: capacity,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-        Self { pipe, group, uniforms, instances, capacity, _font: font }
+        let instances = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("touch overlay shapes"),
+            size: capacity,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        Self {
+            pipe,
+            group,
+            uniforms,
+            instances,
+            capacity,
+            _font: font,
+        }
     }
 }
 

@@ -58,28 +58,80 @@ pub struct Target {
     pub essential: bool,
 }
 
-const fn button(name: &'static str, label: &'static str, race: &'static str, bit: u16, essential: bool) -> Target {
-    Target { name, label, race, bit, axis: 0, dir: 0, essential }
+const fn button(
+    name: &'static str,
+    label: &'static str,
+    race: &'static str,
+    bit: u16,
+    essential: bool,
+) -> Target {
+    Target {
+        name,
+        label,
+        race,
+        bit,
+        axis: 0,
+        dir: 0,
+        essential,
+    }
 }
 
-const fn stick(name: &'static str, label: &'static str, race: &'static str, axis: u8, dir: i8) -> Target {
-    Target { name, label, race, bit: 0, axis, dir, essential: false }
+const fn stick(
+    name: &'static str,
+    label: &'static str,
+    race: &'static str,
+    axis: u8,
+    dir: i8,
+) -> Target {
+    Target {
+        name,
+        label,
+        race,
+        bit: 0,
+        axis,
+        dir,
+        essential: false,
+    }
 }
 
 /// The DualShock 2's buttons, then the sticks' directions (the keyboard's only), in the pages' order.
 pub const TARGETS: [Target; 24] = [
-    button("cross", "Cross", "Pedal (twice: sprint), confirm", 0x4000, true),
+    button(
+        "cross",
+        "Cross",
+        "Pedal (twice: sprint), confirm",
+        0x4000,
+        true,
+    ),
     button("circle", "Circle", "Kick", 0x2000, false),
     button("square", "Square", "Punch", 0x8000, false),
-    button("triangle", "Triangle", "Brake (in the air: tweak), back", 0x1000, true),
+    button(
+        "triangle",
+        "Triangle",
+        "Brake (in the air: tweak), back",
+        0x1000,
+        true,
+    ),
     button("l1", "L1", "Tricks (with R1: Superman)", 0x0400, false),
-    button("r1", "R1", "Tricks (with L1: Superman), settings tabs", 0x0800, true),
+    button(
+        "r1",
+        "R1",
+        "Tricks (with L1: Superman), settings tabs",
+        0x0800,
+        true,
+    ),
     button("l2", "L2", "Tricks", 0x0100, false),
     button("r2", "R2", "Tricks, bunny hop", 0x0200, false),
     button("l3", "L3", "Powerslide", 0x0002, false),
     button("r3", "R3", "Sprint", 0x0004, false),
     button("start", "START", "Pause, start the race", 0x0008, true),
-    button("select", "SELECT", "With up or down: camera, twice: bail out", 0x0001, false),
+    button(
+        "select",
+        "SELECT",
+        "With up or down: camera, twice: bail out",
+        0x0001,
+        false,
+    ),
     button("up", "Up", "Lean, menus", 0x0010, true),
     button("down", "Down", "Lean, menus", 0x0040, true),
     button("left", "Left", "Steer, menus", 0x0080, true),
@@ -108,50 +160,122 @@ pub struct Key {
     pub code: &'static str,
 }
 
-const fn key(name: &'static str, label: &'static str, vk: u8, scancode: u16, code: &'static str) -> Key {
-    Key { name, label, vk, scancode, code }
+const fn key(
+    name: &'static str,
+    label: &'static str,
+    vk: u8,
+    scancode: u16,
+    code: &'static str,
+) -> Key {
+    Key {
+        name,
+        label,
+        vk,
+        scancode,
+        code,
+    }
 }
 
 /// Every key that can be bound. Not Esc (always back and pause), Alt, Ctrl, the Windows keys or Caps
 /// Lock. The keypad's Enter is Enter (the game always took both).
 pub const KEYS: &[Key] = &[
-    key("a", "A", b'A', 4, "KeyA"), key("b", "B", b'B', 5, "KeyB"), key("c", "C", b'C', 6, "KeyC"),
-    key("d", "D", b'D', 7, "KeyD"), key("e", "E", b'E', 8, "KeyE"), key("f", "F", b'F', 9, "KeyF"),
-    key("g", "G", b'G', 10, "KeyG"), key("h", "H", b'H', 11, "KeyH"), key("i", "I", b'I', 12, "KeyI"),
-    key("j", "J", b'J', 13, "KeyJ"), key("k", "K", b'K', 14, "KeyK"), key("l", "L", b'L', 15, "KeyL"),
-    key("m", "M", b'M', 16, "KeyM"), key("n", "N", b'N', 17, "KeyN"), key("o", "O", b'O', 18, "KeyO"),
-    key("p", "P", b'P', 19, "KeyP"), key("q", "Q", b'Q', 20, "KeyQ"), key("r", "R", b'R', 21, "KeyR"),
-    key("s", "S", b'S', 22, "KeyS"), key("t", "T", b'T', 23, "KeyT"), key("u", "U", b'U', 24, "KeyU"),
-    key("v", "V", b'V', 25, "KeyV"), key("w", "W", b'W', 26, "KeyW"), key("x", "X", b'X', 27, "KeyX"),
-    key("y", "Y", b'Y', 28, "KeyY"), key("z", "Z", b'Z', 29, "KeyZ"),
-    key("1", "1", b'1', 30, "Digit1"), key("2", "2", b'2', 31, "Digit2"), key("3", "3", b'3', 32, "Digit3"),
-    key("4", "4", b'4', 33, "Digit4"), key("5", "5", b'5', 34, "Digit5"), key("6", "6", b'6', 35, "Digit6"),
-    key("7", "7", b'7', 36, "Digit7"), key("8", "8", b'8', 37, "Digit8"), key("9", "9", b'9', 38, "Digit9"),
+    key("a", "A", b'A', 4, "KeyA"),
+    key("b", "B", b'B', 5, "KeyB"),
+    key("c", "C", b'C', 6, "KeyC"),
+    key("d", "D", b'D', 7, "KeyD"),
+    key("e", "E", b'E', 8, "KeyE"),
+    key("f", "F", b'F', 9, "KeyF"),
+    key("g", "G", b'G', 10, "KeyG"),
+    key("h", "H", b'H', 11, "KeyH"),
+    key("i", "I", b'I', 12, "KeyI"),
+    key("j", "J", b'J', 13, "KeyJ"),
+    key("k", "K", b'K', 14, "KeyK"),
+    key("l", "L", b'L', 15, "KeyL"),
+    key("m", "M", b'M', 16, "KeyM"),
+    key("n", "N", b'N', 17, "KeyN"),
+    key("o", "O", b'O', 18, "KeyO"),
+    key("p", "P", b'P', 19, "KeyP"),
+    key("q", "Q", b'Q', 20, "KeyQ"),
+    key("r", "R", b'R', 21, "KeyR"),
+    key("s", "S", b'S', 22, "KeyS"),
+    key("t", "T", b'T', 23, "KeyT"),
+    key("u", "U", b'U', 24, "KeyU"),
+    key("v", "V", b'V', 25, "KeyV"),
+    key("w", "W", b'W', 26, "KeyW"),
+    key("x", "X", b'X', 27, "KeyX"),
+    key("y", "Y", b'Y', 28, "KeyY"),
+    key("z", "Z", b'Z', 29, "KeyZ"),
+    key("1", "1", b'1', 30, "Digit1"),
+    key("2", "2", b'2', 31, "Digit2"),
+    key("3", "3", b'3', 32, "Digit3"),
+    key("4", "4", b'4', 33, "Digit4"),
+    key("5", "5", b'5', 34, "Digit5"),
+    key("6", "6", b'6', 35, "Digit6"),
+    key("7", "7", b'7', 36, "Digit7"),
+    key("8", "8", b'8', 37, "Digit8"),
+    key("9", "9", b'9', 38, "Digit9"),
     key("0", "0", b'0', 39, "Digit0"),
-    key("enter", "Enter", 0x0D, 40, "Enter"), key("backspace", "Backspace", 0x08, 42, "Backspace"),
-    key("tab", "Tab", 0x09, 43, "Tab"), key("space", "Space", 0x20, 44, "Space"),
-    key("minus", "Minus", 0xBD, 45, "Minus"), key("equals", "Equals", 0xBB, 46, "Equal"),
-    key("lbracket", "Left Bracket", 0xDB, 47, "BracketLeft"), key("rbracket", "Right Bracket", 0xDD, 48, "BracketRight"),
-    key("backslash", "Backslash", 0xDC, 49, "Backslash"), key("semicolon", "Semicolon", 0xBA, 51, "Semicolon"),
-    key("quote", "Quote", 0xDE, 52, "Quote"), key("backquote", "Backquote", 0xC0, 53, "Backquote"),
-    key("comma", "Comma", 0xBC, 54, "Comma"), key("period", "Period", 0xBE, 55, "Period"),
-    key("slash", "Slash", 0xBF, 56, "Slash"), key("intlbackslash", "Key Beside Shift", 0xE2, 100, "IntlBackslash"),
-    key("f1", "F1", 0x70, 58, "F1"), key("f2", "F2", 0x71, 59, "F2"), key("f3", "F3", 0x72, 60, "F3"),
-    key("f4", "F4", 0x73, 61, "F4"), key("f5", "F5", 0x74, 62, "F5"), key("f6", "F6", 0x75, 63, "F6"),
-    key("f7", "F7", 0x76, 64, "F7"), key("f8", "F8", 0x77, 65, "F8"), key("f9", "F9", 0x78, 66, "F9"),
-    key("f10", "F10", 0x79, 67, "F10"), key("f11", "F11", 0x7A, 68, "F11"), key("f12", "F12", 0x7B, 69, "F12"),
-    key("insert", "Insert", 0x2D, 73, "Insert"), key("home", "Home", 0x24, 74, "Home"),
-    key("pageup", "Page Up", 0x21, 75, "PageUp"), key("delete", "Delete", 0x2E, 76, "Delete"),
-    key("end", "End", 0x23, 77, "End"), key("pagedown", "Page Down", 0x22, 78, "PageDown"),
-    key("right", "Right", 0x27, 79, "ArrowRight"), key("left", "Left", 0x25, 80, "ArrowLeft"),
-    key("down", "Down", 0x28, 81, "ArrowDown"), key("up", "Up", 0x26, 82, "ArrowUp"),
-    key("kp_divide", "Num Divide", 0x6F, 84, "NumpadDivide"), key("kp_multiply", "Num Multiply", 0x6A, 85, "NumpadMultiply"),
-    key("kp_minus", "Num Minus", 0x6D, 86, "NumpadSubtract"), key("kp_plus", "Num Plus", 0x6B, 87, "NumpadAdd"),
-    key("kp1", "Num 1", 0x61, 89, "Numpad1"), key("kp2", "Num 2", 0x62, 90, "Numpad2"), key("kp3", "Num 3", 0x63, 91, "Numpad3"),
-    key("kp4", "Num 4", 0x64, 92, "Numpad4"), key("kp5", "Num 5", 0x65, 93, "Numpad5"), key("kp6", "Num 6", 0x66, 94, "Numpad6"),
-    key("kp7", "Num 7", 0x67, 95, "Numpad7"), key("kp8", "Num 8", 0x68, 96, "Numpad8"), key("kp9", "Num 9", 0x69, 97, "Numpad9"),
-    key("kp0", "Num 0", 0x60, 98, "Numpad0"), key("kp_period", "Num Period", 0x6E, 99, "NumpadDecimal"),
-    key("lshift", "Left Shift", 0xA0, 225, "ShiftLeft"), key("rshift", "Right Shift", 0xA1, 229, "ShiftRight"),
+    key("enter", "Enter", 0x0D, 40, "Enter"),
+    key("backspace", "Backspace", 0x08, 42, "Backspace"),
+    key("tab", "Tab", 0x09, 43, "Tab"),
+    key("space", "Space", 0x20, 44, "Space"),
+    key("minus", "Minus", 0xBD, 45, "Minus"),
+    key("equals", "Equals", 0xBB, 46, "Equal"),
+    key("lbracket", "Left Bracket", 0xDB, 47, "BracketLeft"),
+    key("rbracket", "Right Bracket", 0xDD, 48, "BracketRight"),
+    key("backslash", "Backslash", 0xDC, 49, "Backslash"),
+    key("semicolon", "Semicolon", 0xBA, 51, "Semicolon"),
+    key("quote", "Quote", 0xDE, 52, "Quote"),
+    key("backquote", "Backquote", 0xC0, 53, "Backquote"),
+    key("comma", "Comma", 0xBC, 54, "Comma"),
+    key("period", "Period", 0xBE, 55, "Period"),
+    key("slash", "Slash", 0xBF, 56, "Slash"),
+    key(
+        "intlbackslash",
+        "Key Beside Shift",
+        0xE2,
+        100,
+        "IntlBackslash",
+    ),
+    key("f1", "F1", 0x70, 58, "F1"),
+    key("f2", "F2", 0x71, 59, "F2"),
+    key("f3", "F3", 0x72, 60, "F3"),
+    key("f4", "F4", 0x73, 61, "F4"),
+    key("f5", "F5", 0x74, 62, "F5"),
+    key("f6", "F6", 0x75, 63, "F6"),
+    key("f7", "F7", 0x76, 64, "F7"),
+    key("f8", "F8", 0x77, 65, "F8"),
+    key("f9", "F9", 0x78, 66, "F9"),
+    key("f10", "F10", 0x79, 67, "F10"),
+    key("f11", "F11", 0x7A, 68, "F11"),
+    key("f12", "F12", 0x7B, 69, "F12"),
+    key("insert", "Insert", 0x2D, 73, "Insert"),
+    key("home", "Home", 0x24, 74, "Home"),
+    key("pageup", "Page Up", 0x21, 75, "PageUp"),
+    key("delete", "Delete", 0x2E, 76, "Delete"),
+    key("end", "End", 0x23, 77, "End"),
+    key("pagedown", "Page Down", 0x22, 78, "PageDown"),
+    key("right", "Right", 0x27, 79, "ArrowRight"),
+    key("left", "Left", 0x25, 80, "ArrowLeft"),
+    key("down", "Down", 0x28, 81, "ArrowDown"),
+    key("up", "Up", 0x26, 82, "ArrowUp"),
+    key("kp_divide", "Num Divide", 0x6F, 84, "NumpadDivide"),
+    key("kp_multiply", "Num Multiply", 0x6A, 85, "NumpadMultiply"),
+    key("kp_minus", "Num Minus", 0x6D, 86, "NumpadSubtract"),
+    key("kp_plus", "Num Plus", 0x6B, 87, "NumpadAdd"),
+    key("kp1", "Num 1", 0x61, 89, "Numpad1"),
+    key("kp2", "Num 2", 0x62, 90, "Numpad2"),
+    key("kp3", "Num 3", 0x63, 91, "Numpad3"),
+    key("kp4", "Num 4", 0x64, 92, "Numpad4"),
+    key("kp5", "Num 5", 0x65, 93, "Numpad5"),
+    key("kp6", "Num 6", 0x66, 94, "Numpad6"),
+    key("kp7", "Num 7", 0x67, 95, "Numpad7"),
+    key("kp8", "Num 8", 0x68, 96, "Numpad8"),
+    key("kp9", "Num 9", 0x69, 97, "Numpad9"),
+    key("kp0", "Num 0", 0x60, 98, "Numpad0"),
+    key("kp_period", "Num Period", 0x6E, 99, "NumpadDecimal"),
+    key("lshift", "Left Shift", 0xA0, 225, "ShiftLeft"),
+    key("rshift", "Right Shift", 0xA1, 229, "ShiftRight"),
 ];
 
 /// The pad's word for each input, by the controller's kind (port/hle/hle.h PAD_KIND_*: the
@@ -177,11 +301,31 @@ pub struct PadInput {
 }
 
 const fn pad(id: u8, name: &'static str, labels: [&'static str; 3], sdl: i8, web: i8) -> PadInput {
-    PadInput { id, name, labels: PadLabels { xbox: labels[0], playstation: labels[1], nintendo: labels[2] }, sdl, trigger: 0, web }
+    PadInput {
+        id,
+        name,
+        labels: PadLabels {
+            xbox: labels[0],
+            playstation: labels[1],
+            nintendo: labels[2],
+        },
+        sdl,
+        trigger: 0,
+        web,
+    }
 }
 
-const fn trigger(id: u8, name: &'static str, labels: [&'static str; 3], which: u8, web: i8) -> PadInput {
-    PadInput { trigger: which, ..pad(id, name, labels, -1, web) }
+const fn trigger(
+    id: u8,
+    name: &'static str,
+    labels: [&'static str; 3],
+    which: u8,
+    web: i8,
+) -> PadInput {
+    PadInput {
+        trigger: which,
+        ..pad(id, name, labels, -1, web)
+    }
 }
 
 /// Every controller input that can be bound (not the Guide / PS / Home button: the system's).
@@ -197,14 +341,56 @@ pub const PAD_INPUTS: &[PadInput] = &[
     pad(9, "lb", ["LB", "L1", "L"], 9, 4),
     pad(10, "rb", ["RB", "R1", "R"], 10, 5),
     pad(11, "dpad_up", ["D-pad Up", "D-pad Up", "D-pad Up"], 11, 12),
-    pad(12, "dpad_down", ["D-pad Down", "D-pad Down", "D-pad Down"], 12, 13),
-    pad(13, "dpad_left", ["D-pad Left", "D-pad Left", "D-pad Left"], 13, 14),
-    pad(14, "dpad_right", ["D-pad Right", "D-pad Right", "D-pad Right"], 14, 15),
+    pad(
+        12,
+        "dpad_down",
+        ["D-pad Down", "D-pad Down", "D-pad Down"],
+        12,
+        13,
+    ),
+    pad(
+        13,
+        "dpad_left",
+        ["D-pad Left", "D-pad Left", "D-pad Left"],
+        13,
+        14,
+    ),
+    pad(
+        14,
+        "dpad_right",
+        ["D-pad Right", "D-pad Right", "D-pad Right"],
+        14,
+        15,
+    ),
     pad(15, "misc", ["Share", "Mic", "Capture"], 15, -1),
-    pad(16, "paddle_r1", ["P1", "Right Paddle", "Right Paddle"], 16, -1),
-    pad(17, "paddle_l1", ["P3", "Left Paddle", "Left Paddle"], 17, -1),
-    pad(18, "paddle_r2", ["P2", "Right Paddle 2", "Right Paddle 2"], 18, -1),
-    pad(19, "paddle_l2", ["P4", "Left Paddle 2", "Left Paddle 2"], 19, -1),
+    pad(
+        16,
+        "paddle_r1",
+        ["P1", "Right Paddle", "Right Paddle"],
+        16,
+        -1,
+    ),
+    pad(
+        17,
+        "paddle_l1",
+        ["P3", "Left Paddle", "Left Paddle"],
+        17,
+        -1,
+    ),
+    pad(
+        18,
+        "paddle_r2",
+        ["P2", "Right Paddle 2", "Right Paddle 2"],
+        18,
+        -1,
+    ),
+    pad(
+        19,
+        "paddle_l2",
+        ["P4", "Left Paddle 2", "Left Paddle 2"],
+        19,
+        -1,
+    ),
     pad(20, "touchpad", ["Touchpad", "Touchpad", "Touchpad"], 20, 17),
     trigger(21, "lt", ["LT", "L2", "ZL"], 1, 6),
     trigger(22, "rt", ["RT", "R2", "ZR"], 2, 7),
@@ -226,9 +412,27 @@ pub const KEYBOARD: usize = 0;
 pub const PAD1: usize = 1;
 pub const PAD2: usize = 2;
 pub const DEVICES: [Device; 3] = [
-    Device { key: "keyboard", env: "DHD_KEYBOARD", label: "Keyboard", pad: false, player: 1 },
-    Device { key: "pad1", env: "DHD_PAD1", label: "Controller 1", pad: true, player: 1 },
-    Device { key: "pad2", env: "DHD_PAD2", label: "Controller 2", pad: true, player: 2 },
+    Device {
+        key: "keyboard",
+        env: "DHD_KEYBOARD",
+        label: "Keyboard",
+        pad: false,
+        player: 1,
+    },
+    Device {
+        key: "pad1",
+        env: "DHD_PAD1",
+        label: "Controller 1",
+        pad: true,
+        player: 1,
+    },
+    Device {
+        key: "pad2",
+        env: "DHD_PAD2",
+        label: "Controller 2",
+        pad: true,
+        player: 2,
+    },
 ];
 
 /// A controller's own sticks, inverted: these bits of `Layout::invert`.
@@ -236,14 +440,22 @@ pub const INVERT_LX: u8 = 1;
 pub const INVERT_LY: u8 = 2;
 pub const INVERT_RX: u8 = 4;
 pub const INVERT_RY: u8 = 8;
-const INVERT_NAMES: [(u8, &str); 4] = [(INVERT_LX, "lx"), (INVERT_LY, "ly"), (INVERT_RX, "rx"), (INVERT_RY, "ry")];
+const INVERT_NAMES: [(u8, &str); 4] = [
+    (INVERT_LX, "lx"),
+    (INVERT_LY, "ly"),
+    (INVERT_RX, "rx"),
+    (INVERT_RY, "ry"),
+];
 
 /// A controller's shoulders and triggers swapped (finding 189): these bits of `Layout::swap_shoulders`.
 /// Swap L1/L2: the pad's left shoulder and left trigger change places; Swap R1/R2 the right ones.
 pub const SWAP_L: u8 = 1;
 pub const SWAP_R: u8 = 2;
 /// Each swap's bit, its dhd.ini entry name (`l1l2:swap`) and the two inputs it swaps.
-pub const SWAPS: [(u8, &str, [&str; 2]); 2] = [(SWAP_L, "l1l2", ["lb", "lt"]), (SWAP_R, "r1r2", ["rb", "rt"])];
+pub const SWAPS: [(u8, &str, [&str; 2]); 2] = [
+    (SWAP_L, "l1l2", ["lb", "lt"]),
+    (SWAP_R, "r1r2", ["rb", "rt"]),
+];
 
 /// A layout, as the game keeps it (port/hle/controls_table.h's ControlsLayout, 52 bytes): each
 /// target's main and alternate input (the keyboard: the key's `vk`; a controller: the input's
@@ -263,15 +475,40 @@ pub struct Layout {
 /// The game's layouts before rebinding: the keyboard of docs/PLAYING.md (finding 059) and the pads
 /// by position (finding 059: bottom = Cross).
 const KEYBOARD_DEFAULTS: [(&str, [&str; SLOTS]); 16] = [
-    ("cross", ["space", "x"]), ("circle", ["c", ""]), ("square", ["z", ""]), ("triangle", ["s", "backspace"]),
-    ("l1", ["a", ""]), ("r1", ["d", ""]), ("l2", ["q", ""]), ("r2", ["e", ""]), ("l3", ["f", ""]), ("r3", ["w", ""]),
-    ("start", ["enter", ""]), ("select", ["tab", ""]),
-    ("up", ["up", ""]), ("down", ["down", ""]), ("left", ["left", ""]), ("right", ["right", ""]),
+    ("cross", ["space", "x"]),
+    ("circle", ["c", ""]),
+    ("square", ["z", ""]),
+    ("triangle", ["s", "backspace"]),
+    ("l1", ["a", ""]),
+    ("r1", ["d", ""]),
+    ("l2", ["q", ""]),
+    ("r2", ["e", ""]),
+    ("l3", ["f", ""]),
+    ("r3", ["w", ""]),
+    ("start", ["enter", ""]),
+    ("select", ["tab", ""]),
+    ("up", ["up", ""]),
+    ("down", ["down", ""]),
+    ("left", ["left", ""]),
+    ("right", ["right", ""]),
 ];
 const PAD_DEFAULTS: [(&str, &str); 16] = [
-    ("cross", "south"), ("circle", "east"), ("square", "west"), ("triangle", "north"), ("l1", "lb"), ("r1", "rb"),
-    ("l2", "lt"), ("r2", "rt"), ("l3", "ls"), ("r3", "rs"), ("start", "start"), ("select", "back"),
-    ("up", "dpad_up"), ("down", "dpad_down"), ("left", "dpad_left"), ("right", "dpad_right"),
+    ("cross", "south"),
+    ("circle", "east"),
+    ("square", "west"),
+    ("triangle", "north"),
+    ("l1", "lb"),
+    ("r1", "rb"),
+    ("l2", "lt"),
+    ("r2", "rt"),
+    ("l3", "ls"),
+    ("r3", "rs"),
+    ("start", "start"),
+    ("select", "back"),
+    ("up", "dpad_up"),
+    ("down", "dpad_down"),
+    ("left", "dpad_left"),
+    ("right", "dpad_right"),
 ];
 
 pub fn target(name: &str) -> Option<usize> {
@@ -402,7 +639,14 @@ pub fn parse(device: usize, text: &str, problems: &mut Vec<String>) -> Layout {
             _ => {}
         }
         let Some(t) = target(name).filter(|&t| bindable(device, t)) else {
-            problem(format!("{name} is not a button {}", if dev.pad { "of a controller" } else { "of the keyboard" }));
+            problem(format!(
+                "{name} is not a button {}",
+                if dev.pad {
+                    "of a controller"
+                } else {
+                    "of the keyboard"
+                }
+            ));
             continue;
         };
         if named[t] {
@@ -411,9 +655,19 @@ pub fn parse(device: usize, text: &str, problems: &mut Vec<String>) -> Layout {
         }
         let mut slots = [0u8; SLOTS];
         let mut n = 0;
-        for v in values.split(',').filter(|v| !v.is_empty() && *v != "none" && *v != "-") {
+        for v in values
+            .split(',')
+            .filter(|v| !v.is_empty() && *v != "none" && *v != "-")
+        {
             let Some(code) = input_named(device, v) else {
-                problem(format!("{name}: \"{v}\" is not {}", if dev.pad { "a controller's button" } else { "a key the game can use" }));
+                problem(format!(
+                    "{name}: \"{v}\" is not {}",
+                    if dev.pad {
+                        "a controller's button"
+                    } else {
+                        "a key the game can use"
+                    }
+                ));
                 continue;
             };
             if slots.contains(&code) {
@@ -432,7 +686,11 @@ pub fn parse(device: usize, text: &str, problems: &mut Vec<String>) -> Layout {
         }
         // `none` (or nothing) unbinds the button; a value the game can't read is skipped, so a
         // button with none it can read keeps its default (PLAYING.md, "Controls").
-        if n == 0 && values.split(',').any(|v| !v.is_empty() && v != "none" && v != "-") {
+        if n == 0
+            && values
+                .split(',')
+                .any(|v| !v.is_empty() && v != "none" && v != "-")
+        {
             continue;
         }
         l.input[t] = slots;
@@ -466,15 +724,31 @@ pub fn format(device: usize, l: &Layout) -> String {
         if l.input[t] == defaults.input[t] {
             continue;
         }
-        let codes: Vec<&str> = l.input[t].iter().filter(|&&c| c != 0).map(|&c| input_name(device, c)).collect();
-        add(&format!("{}:{}", TARGETS[t].name, if codes.is_empty() { "none".to_string() } else { codes.join(",") }));
+        let codes: Vec<&str> = l.input[t]
+            .iter()
+            .filter(|&&c| c != 0)
+            .map(|&c| input_name(device, c))
+            .collect();
+        add(&format!(
+            "{}:{}",
+            TARGETS[t].name,
+            if codes.is_empty() {
+                "none".to_string()
+            } else {
+                codes.join(",")
+            }
+        ));
     }
     if DEVICES[device].pad {
         if l.swap_sticks != 0 {
             add("sticks:swap");
         }
         if l.invert != 0 {
-            let axes: Vec<&str> = INVERT_NAMES.iter().filter(|(b, _)| l.invert & b != 0).map(|(_, n)| *n).collect();
+            let axes: Vec<&str> = INVERT_NAMES
+                .iter()
+                .filter(|(b, _)| l.invert & b != 0)
+                .map(|(_, n)| *n)
+                .collect();
             add(&format!("invert:{}", axes.join(",")));
         }
         for (bit, name, _) in SWAPS {
@@ -491,8 +765,15 @@ pub fn format(device: usize, l: &Layout) -> String {
 pub enum Edit {
     /// `input` (a key's vk, a controller input's id) to the target's slot; a button that had it gets the
     /// target's old one there (a swap).
-    Assign { target: usize, slot: usize, input: u8 },
-    Clear { target: usize, slot: usize },
+    Assign {
+        target: usize,
+        slot: usize,
+        input: u8,
+    },
+    Clear {
+        target: usize,
+        slot: usize,
+    },
     /// The device's defaults.
     Reset,
     SwapSticks(bool),
@@ -519,13 +800,23 @@ pub struct Controls {
 
 impl Default for Controls {
     fn default() -> Self {
-        Controls { layouts: [default_layout(KEYBOARD), default_layout(PAD1), default_layout(PAD2)] }
+        Controls {
+            layouts: [
+                default_layout(KEYBOARD),
+                default_layout(PAD1),
+                default_layout(PAD2),
+            ],
+        }
     }
 }
 
 /// What a device's essential button needs, in the pages' words: "a key" or "a button".
 fn an_input(device: usize) -> &'static str {
-    if DEVICES[device].pad { "a button" } else { "a key" }
+    if DEVICES[device].pad {
+        "a button"
+    } else {
+        "a key"
+    }
 }
 
 impl Controls {
@@ -533,7 +824,9 @@ impl Controls {
     /// with nothing on its device puts that device alone back to its defaults, with a line in
     /// `problems`.
     pub fn from_values(values: [&str; 3], problems: &mut Vec<String>) -> Controls {
-        let mut c = Controls { layouts: [0, 1, 2].map(|d| parse(d, values[d], problems)) };
+        let mut c = Controls {
+            layouts: [0, 1, 2].map(|d| parse(d, values[d], problems)),
+        };
         for device in 0..DEVICES.len() {
             if let Some(t) = c.missing(device) {
                 problems.push(format!(
@@ -574,12 +867,24 @@ impl Controls {
         let l = &mut next.layouts[device];
         let mut message = String::new();
         match edit {
-            Edit::Assign { target, slot, input } => {
+            Edit::Assign {
+                target,
+                slot,
+                input,
+            } => {
                 if !bindable(device, target) || slot >= SLOTS {
-                    return Outcome::Refused(format!("{} can't be set on the {}", label_of(target), dev.label.to_lowercase()));
+                    return Outcome::Refused(format!(
+                        "{} can't be set on the {}",
+                        label_of(target),
+                        dev.label.to_lowercase()
+                    ));
                 }
                 if input_label(device, input, kind) == "?" || input == 0 {
-                    return Outcome::Refused(if dev.pad { "That button can't be used".into() } else { "That key can't be used".into() });
+                    return Outcome::Refused(if dev.pad {
+                        "That button can't be used".into()
+                    } else {
+                        "That key can't be used".into()
+                    });
                 }
                 let word = input_label(device, input, kind);
                 // an alternate without a main is the main
@@ -599,7 +904,10 @@ impl Controls {
                         message = if old != 0 {
                             format!("Swapped {} and {}", TARGETS[target].label, TARGETS[t].label)
                         } else {
-                            format!("{word} moved from {} to {}", TARGETS[t].label, TARGETS[target].label)
+                            format!(
+                                "{word} moved from {} to {}",
+                                TARGETS[t].label, TARGETS[target].label
+                            )
                         };
                     }
                     None => l.input[target][slot] = input,
@@ -618,9 +926,15 @@ impl Controls {
                 l.invert = if on { l.invert | bit } else { l.invert & !bit };
             }
             Edit::SwapShoulders(bit, on) if dev.pad && SWAPS.iter().any(|(b, _, _)| *b == bit) => {
-                l.swap_shoulders = if on { l.swap_shoulders | bit } else { l.swap_shoulders & !bit };
+                l.swap_shoulders = if on {
+                    l.swap_shoulders | bit
+                } else {
+                    l.swap_shoulders & !bit
+                };
             }
-            Edit::SwapSticks(_) | Edit::Invert(..) | Edit::SwapShoulders(..) => return Outcome::Unchanged,
+            Edit::SwapSticks(_) | Edit::Invert(..) | Edit::SwapShoulders(..) => {
+                return Outcome::Unchanged
+            }
         }
         if next == *self {
             return Outcome::Unchanged;
@@ -663,7 +977,10 @@ pub fn c_table() -> String {
         "enum {{ CONTROL_INVERT_LX = {INVERT_LX}, CONTROL_INVERT_LY = {INVERT_LY}, CONTROL_INVERT_RX = {INVERT_RX}, \
          CONTROL_INVERT_RY = {INVERT_RY} }};"
     );
-    let _ = writeln!(out, "enum {{ CONTROL_SWAP_L = {SWAP_L}, CONTROL_SWAP_R = {SWAP_R} }};");
+    let _ = writeln!(
+        out,
+        "enum {{ CONTROL_SWAP_L = {SWAP_L}, CONTROL_SWAP_R = {SWAP_R} }};"
+    );
     out += "/* dhd_controls_edit's edits and answers (dhd_settings.h) */\n\
             enum { CONTROL_ASSIGN, CONTROL_CLEAR, CONTROL_RESET, CONTROL_SWAP_STICKS, CONTROL_INVERT, CONTROL_SWAP_SHOULDERS };\n\
             enum { CONTROL_REFUSED = -1, CONTROL_UNCHANGED = 0, CONTROL_CHANGED = 1 };\n\n";
@@ -685,7 +1002,11 @@ pub fn c_table() -> String {
             typedef struct { const char *name, *label; uint8_t vk; uint16_t scancode; } ControlKey;\n\
             static const ControlKey control_keys[CONTROL_KEYS] = {\n";
     for k in KEYS {
-        let _ = writeln!(out, "    {{\"{}\", \"{}\", 0x{:02X}, {}}},", k.name, k.label, k.vk, k.scancode);
+        let _ = writeln!(
+            out,
+            "    {{\"{}\", \"{}\", 0x{:02X}, {}}},",
+            k.name, k.label, k.vk, k.scancode
+        );
     }
     out += "};\n\n/* The controller inputs that can be bound: id, dhd.ini name, the words of an Xbox, a PlayStation and a\n   \
             Nintendo pad, SDL_GamepadButton (-1: a trigger: 1 left, 2 right). */\n\
@@ -702,13 +1023,28 @@ pub fn c_table() -> String {
             static const ControlsLayout control_defaults[CONTROL_DEVICES] = {\n";
     for d in 0..3 {
         let l = default_layout(d);
-        let pairs: Vec<String> = l.input.iter().map(|s| format!("{{{}, {}}}", s[0], s[1])).collect();
-        let _ = writeln!(out, "    {{{{{}}}, {}, {}, {}, 0}},", pairs.join(", "), l.swap_sticks, l.invert, l.swap_shoulders);
+        let pairs: Vec<String> = l
+            .input
+            .iter()
+            .map(|s| format!("{{{}, {}}}", s[0], s[1]))
+            .collect();
+        let _ = writeln!(
+            out,
+            "    {{{{{}}}, {}, {}, {}, 0}},",
+            pairs.join(", "),
+            l.swap_sticks,
+            l.invert,
+            l.swap_shoulders
+        );
     }
     out += "};\n\n/* The settings: dhd.ini key and variable of the keyboard, Controller 1 and Controller 2. */\n\
             static const struct { const char *key, *env, *label; } control_devices[CONTROL_DEVICES] = {\n";
     for d in &DEVICES {
-        let _ = writeln!(out, "    {{\"{}\", \"{}\", \"{}\"}},", d.key, d.env, d.label);
+        let _ = writeln!(
+            out,
+            "    {{\"{}\", \"{}\", \"{}\"}},",
+            d.key, d.env, d.label
+        );
     }
     out += "};\n\n#endif\n";
     out

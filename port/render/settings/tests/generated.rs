@@ -3,12 +3,19 @@
 //! differs; with DHD_SETTINGS_BLESS=1 they write it.
 
 fn current(file: &str, want: String) {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../hle").join(file);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../hle")
+        .join(file);
     if std::env::var_os("DHD_SETTINGS_BLESS").is_some() {
         std::fs::write(&path, &want).unwrap();
     }
-    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
-    assert!(have == want, "port/hle/{file} is not the crate's: DHD_SETTINGS_BLESS=1 cargo test -p dhd_settings");
+    let have = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    assert!(
+        have == want,
+        "port/hle/{file} is not the crate's: DHD_SETTINGS_BLESS=1 cargo test -p dhd_settings"
+    );
 }
 
 #[test]
@@ -27,7 +34,10 @@ fn online_names_choices_and_defaults() {
     assert_eq!(setting.env, "DHD_NAMES");
     assert_eq!(setting.default, "small");
     assert_eq!(setting.builtin, "small");
-    assert_eq!(setting.choices.iter().map(|c| c.value).collect::<Vec<_>>(), ["off", "small", "medium", "large"]);
+    assert_eq!(
+        setting.choices.iter().map(|c| c.value).collect::<Vec<_>>(),
+        ["off", "small", "medium", "large"]
+    );
     assert_eq!(setting.canonical("MEDIUM"), Some("medium"));
     assert_eq!(setting.canonical("broken"), None);
 }

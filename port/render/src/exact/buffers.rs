@@ -27,22 +27,33 @@ use std::num::NonZeroU64;
 
 /// Sizes in bytes, by `DHDR_B_*` (OPTRACE.md).
 pub const SIZES: [u64; 11] = [
-    4 << 20,            // vram
-    4 << 20,            // snapshot
-    1024 * 3088,        // states: MAX_STATES x sizeof(Constants)
-    16384 * 208,        // primitives: MAX_PRIMITIVES x sizeof(Primitive)
+    4 << 20,             // vram
+    4 << 20,             // snapshot
+    1024 * 3088,         // states: MAX_STATES x sizeof(Constants)
+    16384 * 208,         // primitives: MAX_PRIMITIVES x sizeof(Primitive)
     4 * 1024 * 1024 * 4, // bins: MAX_BIN_WORDS x 4
-    48,                 // display constants
-    48,                 // copy constants
-    4 << 20,            // readback
-    4 << 20,            // staged
-    4096 * 256,         // batches: MAX_BATCHES x BATCH_STRIDE
-    4 << 20,            // upload
+    48,                  // display constants
+    48,                  // copy constants
+    4 << 20,             // readback
+    4 << 20,             // staged
+    4096 * 256,          // batches: MAX_BATCHES x BATCH_STRIDE
+    4 << 20,             // upload
 ];
 
 /// Labels, by `DHDR_B_*` (`gpu_wgpu.c`'s).
-const LABELS: [&str; 11] = ["vram", "snapshot", "states", "primitives", "bins", "display", "copy", "readback",
-                            "staged", "batches", "upload"];
+const LABELS: [&str; 11] = [
+    "vram",
+    "snapshot",
+    "states",
+    "primitives",
+    "bins",
+    "display",
+    "copy",
+    "readback",
+    "staged",
+    "batches",
+    "upload",
+];
 
 /// Usages, by `DHDR_B_*` (`gpu_wgpu.c`'s wgpu_init; `gpu.js`'s buffers).
 pub fn usage(id: u32) -> wgpu::BufferUsages {
@@ -118,15 +129,25 @@ impl Buffers {
         let main_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("main"),
             layout: &pipelines.main.get_bind_group_layout(0),
-            entries: &[record, whole(1, DHDR_B_SNAPSHOT), whole(2, DHDR_B_VRAM), whole(3, DHDR_B_PRIMITIVES),
-                       whole(4, DHDR_B_BINS), whole(10, DHDR_B_STATES)],
+            entries: &[
+                record,
+                whole(1, DHDR_B_SNAPSHOT),
+                whole(2, DHDR_B_VRAM),
+                whole(3, DHDR_B_PRIMITIVES),
+                whole(4, DHDR_B_BINS),
+                whole(10, DHDR_B_STATES),
+            ],
         });
         let copy_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("local_copy"),
             layout: &pipelines.local_copy.get_bind_group_layout(0),
             entries: &[whole(2, DHDR_B_VRAM), whole(6, DHDR_B_COPY)],
         });
-        Buffers { list, main_group, copy_group }
+        Buffers {
+            list,
+            main_group,
+            copy_group,
+        }
     }
 
     /// Buffer `id` (`DHDR_B_*`), or None outside the header's numbers.
@@ -136,8 +157,11 @@ impl Buffers {
 
     /// Buffer `id` (`DHDR_B_*`). A number outside the header's is fatal (logged, then abort).
     pub fn get(&self, id: u32) -> &wgpu::Buffer {
-        self.checked(id)
-            .unwrap_or_else(|| crate::guard::fatal(&format!("dhd_render: {}: buffer {id} is not a DHDR_B_* number",
-                                                            crate::guard::current_export())))
+        self.checked(id).unwrap_or_else(|| {
+            crate::guard::fatal(&format!(
+                "dhd_render: {}: buffer {id} is not a DHDR_B_* number",
+                crate::guard::current_export()
+            ))
+        })
     }
 }

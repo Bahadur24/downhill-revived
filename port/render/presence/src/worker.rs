@@ -1,7 +1,9 @@
 //! The thread that talks to Discord. Its calls block (the pipe or socket is read and written
 //! plainly), so the game never waits on them: the game's calls only post a message.
 
-use crate::{payload, Clock, Due, Kind, Pacer, Payload, State, APP_ID, BUTTONS, LOGO, LOGO_TEXT, RETRY};
+use crate::{
+    payload, Clock, Due, Kind, Pacer, Payload, State, APP_ID, BUTTONS, LOGO, LOGO_TEXT, RETRY,
+};
 use discord_rich_presence::activity::{Activity, Assets, Button, Timestamps};
 use discord_rich_presence::{DiscordIpc, DiscordIpcClient};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
@@ -51,7 +53,10 @@ impl Worker {
 }
 
 fn unix_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// The activity Discord gets for `p`: its two lines, the elapsed time, the logo and the buttons.
@@ -60,7 +65,12 @@ pub fn activity(p: &Payload) -> Activity<'_> {
         .details(p.details.as_str())
         .timestamps(Timestamps::new().start(p.start))
         .assets(Assets::new().large_image(LOGO).large_text(LOGO_TEXT))
-        .buttons(BUTTONS.iter().map(|(label, url)| Button::new(*label, *url)).collect());
+        .buttons(
+            BUTTONS
+                .iter()
+                .map(|(label, url)| Button::new(*label, *url))
+                .collect(),
+        );
     if let Some(state) = &p.state {
         a = a.state(state.as_str());
     }
@@ -76,7 +86,12 @@ fn send(client: &mut DiscordIpcClient, p: Option<&Payload>) -> Result<Option<Str
     }
     .map_err(|_| ())?;
     let (_, answer) = client.recv().map_err(|_| ())?;
-    Ok((answer["evt"] == "ERROR").then(|| answer["data"]["message"].as_str().unwrap_or("?").to_string()))
+    Ok((answer["evt"] == "ERROR").then(|| {
+        answer["data"]["message"]
+            .as_str()
+            .unwrap_or("?")
+            .to_string()
+    }))
 }
 
 fn connect() -> Option<DiscordIpcClient> {
@@ -135,11 +150,13 @@ fn run(from: Receiver<Message>, log: Log) {
                 let _ = done.send(());
                 return;
             }
-            None if wait.is_none() => return,  // the game's side is gone
+            None if wait.is_none() => return, // the game's side is gone
             None => {}
         }
         let now = Instant::now();
-        let Due::Send(p) = pacer.due(now) else { continue };
+        let Due::Send(p) = pacer.due(now) else {
+            continue;
+        };
         if client.is_none() {
             if now < next_try {
                 continue;

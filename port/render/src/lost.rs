@@ -40,8 +40,14 @@ pub fn note(reason: wgpu::DeviceLostReason, message: &str) {
         return;
     }
     if !LOST.swap(true, Ordering::AcqRel) {
-        crate::host::log(&format!("gs: the GPU device was lost ({reason:?}): {}",
-                                  if message.is_empty() { "no message" } else { message }));
+        crate::host::log(&format!(
+            "gs: the GPU device was lost ({reason:?}): {}",
+            if message.is_empty() {
+                "no message"
+            } else {
+                message
+            }
+        ));
     }
 }
 
@@ -73,15 +79,21 @@ fn report(gpu: &crate::device::Gpu) {
         d3d12::report(gpu);
         return;
     }
-    crate::host::log(&format!("gs: the device was on {:?}, {} (driver {} {})", gpu.info.backend, gpu.info.name,
-                              gpu.info.driver, gpu.info.driver_info));
+    crate::host::log(&format!(
+        "gs: the device was on {:?}, {} (driver {} {})",
+        gpu.info.backend, gpu.info.name, gpu.info.driver, gpu.info.driver_info
+    ));
 }
 
 /// `DHD_TEST_DEVICE_LOST=N`'s count: called for every frame a surface acquired.
 pub fn frame_acquired(gpu: &crate::device::Gpu) {
     static AT: OnceLock<Option<u64>> = OnceLock::new();
     static FRAMES: AtomicU64 = AtomicU64::new(0);
-    let at = *AT.get_or_init(|| std::env::var("DHD_TEST_DEVICE_LOST").ok().and_then(|v| v.trim().parse().ok()));
+    let at = *AT.get_or_init(|| {
+        std::env::var("DHD_TEST_DEVICE_LOST")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+    });
     let Some(at) = at else { return };
     if FRAMES.fetch_add(1, Ordering::Relaxed) + 1 != at {
         return;
@@ -91,7 +103,10 @@ pub fn frame_acquired(gpu: &crate::device::Gpu) {
         d3d12::remove(gpu);
         return;
     }
-    crate::host::log(&format!("test: DHD_TEST_DEVICE_LOST: no device removal on {:?}", gpu.info.backend));
+    crate::host::log(&format!(
+        "test: DHD_TEST_DEVICE_LOST: no device removal on {:?}",
+        gpu.info.backend
+    ));
 }
 
 /// D3D12's side: DRED before the device is made, the removed reason and DRED's output after.
@@ -128,12 +143,20 @@ pub mod d3d12 {
     /// imports no d3d12.dll (wgpu loads it itself), so its imports stay Windows' core DLLs that
     /// package_release.py allows.
     fn dred_settings() -> Result<ID3D12DeviceRemovedExtendedDataSettings, String> {
-        type GetDebugInterface =
-            unsafe extern "system" fn(*const windows::core::GUID, *mut *mut core::ffi::c_void) -> windows::core::HRESULT;
+        type GetDebugInterface = unsafe extern "system" fn(
+            *const windows::core::GUID,
+            *mut *mut core::ffi::c_void,
+        ) -> windows::core::HRESULT;
         const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x800;
         let name: Vec<u16> = "d3d12.dll\0".encode_utf16().collect();
         // SAFETY: a NUL-terminated name; the module stays loaded for the process (never freed).
-        let module = unsafe { LoadLibraryExW(name.as_ptr(), std::ptr::null_mut(), LOAD_LIBRARY_SEARCH_SYSTEM32) };
+        let module = unsafe {
+            LoadLibraryExW(
+                name.as_ptr(),
+                std::ptr::null_mut(),
+                LOAD_LIBRARY_SEARCH_SYSTEM32,
+            )
+        };
         if module.is_null() {
             return Err("no d3d12.dll".into());
         }
@@ -146,7 +169,9 @@ pub mod d3d12 {
         let get: GetDebugInterface = unsafe { std::mem::transmute(proc_) };
         let mut raw = std::ptr::null_mut();
         // SAFETY: the interface's IID and an out pointer for it.
-        unsafe { get(&ID3D12DeviceRemovedExtendedDataSettings::IID, &mut raw) }.ok().map_err(|e| format!("{e:?}"))?;
+        unsafe { get(&ID3D12DeviceRemovedExtendedDataSettings::IID, &mut raw) }
+            .ok()
+            .map_err(|e| format!("{e:?}"))?;
         if raw.is_null() {
             return Err("no settings object".into());
         }
@@ -169,12 +194,29 @@ pub mod d3d12 {
 
     /// The breadcrumb operations' names (D3D12_AUTO_BREADCRUMB_OP).
     fn op_name(op: i32) -> &'static str {
-        const NAMES: [&str; 21] = ["SetMarker", "BeginEvent", "EndEvent", "DrawInstanced", "DrawIndexedInstanced",
-                                   "ExecuteIndirect", "Dispatch", "CopyBufferRegion", "CopyTextureRegion",
-                                   "CopyResource", "CopyTiles", "ResolveSubresource", "ClearRenderTargetView",
-                                   "ClearUnorderedAccessView", "ClearDepthStencilView", "ResourceBarrier",
-                                   "ExecuteBundle", "Present", "ResolveQueryData", "BeginSubmission",
-                                   "EndSubmission"];
+        const NAMES: [&str; 21] = [
+            "SetMarker",
+            "BeginEvent",
+            "EndEvent",
+            "DrawInstanced",
+            "DrawIndexedInstanced",
+            "ExecuteIndirect",
+            "Dispatch",
+            "CopyBufferRegion",
+            "CopyTextureRegion",
+            "CopyResource",
+            "CopyTiles",
+            "ResolveSubresource",
+            "ClearRenderTargetView",
+            "ClearUnorderedAccessView",
+            "ClearDepthStencilView",
+            "ResourceBarrier",
+            "ExecuteBundle",
+            "Present",
+            "ResolveQueryData",
+            "BeginSubmission",
+            "EndSubmission",
+        ];
         match op {
             0..=20 => NAMES[op as usize],
             26 => "WriteBufferImmediate",
@@ -193,20 +235,28 @@ pub mod d3d12 {
             return String::new();
         }
         // SAFETY: the caller's contract.
-        unsafe { std::ffi::CStr::from_ptr(p.cast()) }.to_string_lossy().into_owned()
+        unsafe { std::ffi::CStr::from_ptr(p.cast()) }
+            .to_string_lossy()
+            .into_owned()
     }
 
     pub fn report(gpu: &Gpu) {
         // SAFETY: the raw device is only read here; wgpu keeps it alive while borrowed.
-        let Some(hal) = (unsafe { gpu.device.as_hal::<wgpu_hal::api::Dx12>() }) else { return };
+        let Some(hal) = (unsafe { gpu.device.as_hal::<wgpu_hal::api::Dx12>() }) else {
+            return;
+        };
         let raw = hal.raw_device();
         // SAFETY: a live device; GetDeviceRemovedReason takes nothing.
         let code = match unsafe { raw.GetDeviceRemovedReason() } {
             Ok(()) => 0,
             Err(e) => e.code().0 as u32,
         };
-        crate::host::log(&format!("gs: D3D12 removed reason 0x{code:08X}: {} ({}, driver {})", reason_name(code),
-                                  gpu.info.name, gpu.info.driver));
+        crate::host::log(&format!(
+            "gs: D3D12 removed reason 0x{code:08X}: {} ({}, driver {})",
+            reason_name(code),
+            gpu.info.name,
+            gpu.info.driver
+        ));
         let Ok(dred) = raw.cast::<ID3D12DeviceRemovedExtendedData>() else {
             crate::host::log("gs: no DRED on this system");
             return;
@@ -215,7 +265,9 @@ pub mod d3d12 {
         let crumbs = match unsafe { dred.GetAutoBreadcrumbsOutput() } {
             Ok(c) => c,
             Err(e) => {
-                crate::host::log(&format!("gs: no DRED breadcrumbs ({e}; start the game with DHD_GPU_DRED=1 for them)"));
+                crate::host::log(&format!(
+                    "gs: no DRED breadcrumbs ({e}; start the game with DHD_GPU_DRED=1 for them)"
+                ));
                 return;
             }
         };
@@ -224,25 +276,42 @@ pub mod d3d12 {
         while !node.is_null() && lists < 4096 {
             // SAFETY: DRED's list of nodes, alive with the device.
             let n = unsafe { &*node };
-            let done = if n.pLastBreadcrumbValue.is_null() { 0 } else { unsafe { *n.pLastBreadcrumbValue } };
+            let done = if n.pLastBreadcrumbValue.is_null() {
+                0
+            } else {
+                unsafe { *n.pLastBreadcrumbValue }
+            };
             if done < n.BreadcrumbCount && !n.pCommandHistory.is_null() && unfinished < 16 {
                 unfinished += 1;
                 // SAFETY: as above; the history holds BreadcrumbCount operations.
-                let ops = unsafe { std::slice::from_raw_parts(n.pCommandHistory, n.BreadcrumbCount as usize) };
+                let ops = unsafe {
+                    std::slice::from_raw_parts(n.pCommandHistory, n.BreadcrumbCount as usize)
+                };
                 let from = done.saturating_sub(2) as usize;
                 let to = (done as usize + 3).min(ops.len());
                 let around: Vec<String> = (from..to)
-                    .map(|i| format!("{}{}", if i == done as usize { ">" } else { "" }, op_name(ops[i].0)))
+                    .map(|i| {
+                        format!(
+                            "{}{}",
+                            if i == done as usize { ">" } else { "" },
+                            op_name(ops[i].0)
+                        )
+                    })
                     .collect();
                 // SAFETY: names are NUL-terminated or null.
                 let list = unsafe { name(n.pCommandListDebugNameA) };
-                crate::host::log(&format!("gs: DRED: command list \"{list}\" stopped at operation {done} of {}: {}",
-                                          n.BreadcrumbCount, around.join(" ")));
+                crate::host::log(&format!(
+                    "gs: DRED: command list \"{list}\" stopped at operation {done} of {}: {}",
+                    n.BreadcrumbCount,
+                    around.join(" ")
+                ));
             }
             node = n.pNext;
             lists += 1;
         }
-        crate::host::log(&format!("gs: DRED: {lists} command lists recorded, {unfinished} of them not finished"));
+        crate::host::log(&format!(
+            "gs: DRED: {lists} command lists recorded, {unfinished} of them not finished"
+        ));
         // SAFETY: as above.
         if let Ok(fault) = unsafe { dred.GetPageFaultAllocationOutput() } {
             if fault.PageFaultVA != 0 {
@@ -254,8 +323,11 @@ pub mod d3d12 {
                     names.push(unsafe { name(an.ObjectNameA) });
                     a = an.pNext;
                 }
-                crate::host::log(&format!("gs: DRED: GPU page fault at 0x{:X} (allocations there: {})",
-                                          fault.PageFaultVA, names.join(", ")));
+                crate::host::log(&format!(
+                    "gs: DRED: GPU page fault at 0x{:X} (allocations there: {})",
+                    fault.PageFaultVA,
+                    names.join(", ")
+                ));
             }
         }
     }
@@ -263,14 +335,20 @@ pub mod d3d12 {
     /// `DHD_TEST_DEVICE_LOST`: removes this process's D3D12 device (ID3D12Device5::RemoveDevice).
     pub fn remove(gpu: &Gpu) {
         // SAFETY: as report.
-        let Some(hal) = (unsafe { gpu.device.as_hal::<wgpu_hal::api::Dx12>() }) else { return };
+        let Some(hal) = (unsafe { gpu.device.as_hal::<wgpu_hal::api::Dx12>() }) else {
+            return;
+        };
         match hal.raw_device().cast::<ID3D12Device5>() {
             Ok(d5) => {
-                crate::host::log("test: DHD_TEST_DEVICE_LOST: removing the D3D12 device (RemoveDevice)");
+                crate::host::log(
+                    "test: DHD_TEST_DEVICE_LOST: removing the D3D12 device (RemoveDevice)",
+                );
                 // SAFETY: a live device; RemoveDevice marks this device removed, nothing else.
                 unsafe { d5.RemoveDevice() };
             }
-            Err(e) => crate::host::log(&format!("test: DHD_TEST_DEVICE_LOST: no ID3D12Device5: {e}")),
+            Err(e) => crate::host::log(&format!(
+                "test: DHD_TEST_DEVICE_LOST: no ID3D12Device5: {e}"
+            )),
         }
     }
 }

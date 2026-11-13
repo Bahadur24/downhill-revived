@@ -58,19 +58,38 @@ pub struct Display {
 /// scanout's pipeline, the vram buffer and the display constants buffer (the C path's `wg.scanout`,
 /// `p->vram`, `p->display_constants`). The only place this file reaches into pipelines.rs (A2) and
 /// buffers.rs (A3).
-fn scanout_inputs<'a>(pipelines: &'a Pipelines, buffers: &'a Buffers)
-                      -> (&'a wgpu::ComputePipeline, &'a wgpu::Buffer, &'a wgpu::Buffer) {
-    (&pipelines.scanout, buffers.get(DHDR_B_VRAM), buffers.get(DHDR_B_DISPLAY))
+fn scanout_inputs<'a>(
+    pipelines: &'a Pipelines,
+    buffers: &'a Buffers,
+) -> (
+    &'a wgpu::ComputePipeline,
+    &'a wgpu::Buffer,
+    &'a wgpu::Buffer,
+) {
+    (
+        &pipelines.scanout,
+        buffers.get(DHDR_B_VRAM),
+        buffers.get(DHDR_B_DISPLAY),
+    )
 }
 
 impl Display {
     pub fn new() -> Display {
-        Display { target: None, capture: None }
+        Display {
+            target: None,
+            capture: None,
+        }
     }
 
     /// The texture (and scanout's bind group) at width x height, remade when the size changed.
-    pub fn ensure(&mut self, gpu: &Gpu, pipelines: &Pipelines, buffers: &Buffers, width: u32, height: u32)
-                  -> Result<(), String> {
+    pub fn ensure(
+        &mut self,
+        gpu: &Gpu,
+        pipelines: &Pipelines,
+        buffers: &Buffers,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
         if let Some(t) = &self.target {
             if t.width == width && t.height == height {
                 return Ok(());
@@ -78,18 +97,26 @@ impl Display {
         }
         if self.capture.is_some() {
             // Owned<T> keeps every other call out between a begin and its finish.
-            return Err("exact::display: the display texture resized while a capture is in flight".into());
+            return Err(
+                "exact::display: the display texture resized while a capture is in flight".into(),
+            );
         }
         // gpu_wgpu.c's display_release: the old size's objects go first, whatever happens next.
         self.target = None;
         if width == 0 || height == 0 || width > MAX_SIDE || height > MAX_SIDE {
-            return Err(format!("exact::display: a {width} x {height} display (1..={MAX_SIDE} each way)"));
+            return Err(format!(
+                "exact::display: a {width} x {height} display (1..={MAX_SIDE} each way)"
+            ));
         }
         let (scanout, vram, constants) = scanout_inputs(pipelines, buffers);
         let device = &gpu.device;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("display"),
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -112,12 +139,29 @@ impl Display {
             label: Some("scanout"),
             layout: &scanout.get_bind_group_layout(0),
             entries: &[
-                wgpu::BindGroupEntry { binding: 1, resource: vram.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 5, resource: constants.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 7, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: vram.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: constants.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
             ],
         });
-        self.target = Some(Target { texture, view, group, readback, width, height, stride });
+        self.target = Some(Target {
+            texture,
+            view,
+            group,
+            readback,
+            width,
+            height,
+            stride,
+        });
         Ok(())
     }
 
@@ -146,7 +190,11 @@ impl Display {
     /// until mapped). Pending exact work was submitted by the caller first.
     fn capture_start(&mut self, gpu: &Gpu) -> Option<(u32, u32)> {
         let t = self.target.as_ref()?;
-        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("capture") });
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("capture"),
+            });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &t.texture,
@@ -162,15 +210,20 @@ impl Display {
                     rows_per_image: Some(t.height),
                 },
             },
-            wgpu::Extent3d { width: t.width, height: t.height, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: t.width,
+                height: t.height,
+                depth_or_array_layers: 1,
+            },
         );
         gpu.queue.submit([encoder.finish()]);
         let status: MapStatus = Arc::new(Mutex::new(None));
         let s = status.clone();
         let bytes = t.stride as u64 * t.height as u64;
-        t.readback.map_async(wgpu::MapMode::Read, 0..bytes, move |r| {
-            *s.lock().unwrap_or_else(|p| p.into_inner()) = Some(r);
-        });
+        t.readback
+            .map_async(wgpu::MapMode::Read, 0..bytes, move |r| {
+                *s.lock().unwrap_or_else(|p| p.into_inner()) = Some(r);
+            });
         // Natively the map completes here (gpu_wgpu.c's map_read polled until done). In the browser
         // the map resolves while the reactor awaits it between begin and finish (web/wait.rs, B1).
         #[cfg(not(target_arch = "wasm32"))]
@@ -206,7 +259,10 @@ impl Display {
         }
         let (w, h, stride) = (t.width as usize, t.height as usize, t.stride as usize);
         if pixels.len() < w * h {
-            crate::host::log(&format!("dhd_render: exact capture: {} pixels for a {w} x {h} display", pixels.len()));
+            crate::host::log(&format!(
+                "dhd_render: exact capture: {} pixels for a {w} x {h} display",
+                pixels.len()
+            ));
             t.readback.unmap();
             return 0;
         }
@@ -250,7 +306,11 @@ impl Exact {
 
     /// The size the capture in flight returns (finish's pixel count is its product).
     pub fn capture_size(&self) -> (u32, u32) {
-        if self.display.capture.is_some() { self.display.size() } else { (0, 0) }
+        if self.display.capture.is_some() {
+            self.display.size()
+        } else {
+            (0, 0)
+        }
     }
 
     /// `dhdr_exact_capture_finish`: 1 ok, 0 the map failed.
@@ -261,13 +321,25 @@ impl Exact {
     /// A movie or CPU-scanout frame into the display texture, as scanout would leave it
     /// (gpu_wgpu.c's wgpu_present with pixels): sized to width x height (<= 1024 each way), then a
     /// queue write of the `width * height` RGBA8 pixels (lands before the next submit).
-    pub fn display_upload(&mut self, pixels: &[u32], width: u32, height: u32) -> Result<(), String> {
+    pub fn display_upload(
+        &mut self,
+        pixels: &[u32],
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
         if pixels.len() < width as usize * height as usize {
-            return Err(format!("exact::display: {} pixels for a {width} x {height} frame", pixels.len()));
+            return Err(format!(
+                "exact::display: {} pixels for a {width} x {height} frame",
+                pixels.len()
+            ));
         }
         let gpu = self.gpu;
-        self.display.ensure(gpu, &self.pipelines, &self.buffers, width, height)?;
-        let texture = self.display.texture().expect("ensure made the display texture");
+        self.display
+            .ensure(gpu, &self.pipelines, &self.buffers, width, height)?;
+        let texture = self
+            .display
+            .texture()
+            .expect("ensure made the display texture");
         gpu.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture,
@@ -276,8 +348,16 @@ impl Exact {
                 aspect: wgpu::TextureAspect::All,
             },
             as_bytes(&pixels[..width as usize * height as usize]),
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: Some(height) },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
         Ok(())
     }

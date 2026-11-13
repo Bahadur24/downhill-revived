@@ -68,7 +68,14 @@ impl Default for Display {
 
 impl Display {
     pub fn new() -> Display {
-        Display { target: None, width: 0, height: 0, generation: 0, reading: None, group: None }
+        Display {
+            target: None,
+            width: 0,
+            height: 0,
+            generation: 0,
+            reading: None,
+            group: None,
+        }
     }
 
     /// (display_width, display_height): the displayed picture's size; 0, 0 when none.
@@ -107,13 +114,19 @@ impl Display {
         }
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("native display"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            size: wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST
+            usage: wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::RENDER_ATTACHMENT, // `black` clears it
             view_formats: &[],
         });
@@ -125,7 +138,12 @@ impl Display {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        self.target = Some(Target { texture, view, readback, stride });
+        self.target = Some(Target {
+            texture,
+            view,
+            readback,
+            stride,
+        });
         self.width = w;
         self.height = h;
         true
@@ -146,8 +164,16 @@ impl Display {
                 aspect: wgpu::TextureAspect::All,
             },
             pixel_bytes(&pixels[..w as usize * h as usize]),
-            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(w * 4),
+                rows_per_image: Some(h),
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         true
     }
@@ -163,7 +189,10 @@ impl Display {
                 view: &t.view,
                 depth_slice: None,
                 resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -178,8 +207,16 @@ impl Display {
     /// it). The caller has checked the picture has a display surface with a texture. False: not
     /// shown.
     #[allow(clippy::too_many_arguments)]
-    pub fn scanout(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, arenas: &mut Arenas, o: &ScanoutObjects,
-                   source: &wgpu::TextureView, scale: u32, display: &[u32; 12]) -> bool {
+    pub fn scanout(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        arenas: &mut Arenas,
+        o: &ScanoutObjects,
+        source: &wgpu::TextureView,
+        scale: u32,
+        display: &[u32; 12],
+    ) -> bool {
         // An upscaled display surface gives a picture as many times larger (native.wgsl).
         let mut d = *display;
         d[5] = d[5].wrapping_mul(scale);
@@ -199,26 +236,46 @@ impl Display {
         }
         let Some(t) = &self.target else { return false };
         let offset = arenas.constants(struct_bytes(&d));
-        if self.group.as_ref().is_none_or(|(view, generation, _)| view != source || *generation != self.generation) {
+        if self
+            .group
+            .as_ref()
+            .is_none_or(|(view, generation, _)| view != source || *generation != self.generation)
+        {
             let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("native scanout"),
                 layout: o.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&t.view) },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&t.view),
+                    },
                 ],
             });
             self.group = Some((source.clone(), self.generation, group));
         }
-        let Some((_, _, group)) = &self.group else { return false };
-        let Some(uniforms) = arenas.uniform_group() else { return false };
+        let Some((_, _, group)) = &self.group else {
+            return false;
+        };
+        let Some(uniforms) = arenas.uniform_group() else {
+            return false;
+        };
         let times = gputimes::slot(gpu, gputimes::SCANOUT);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: None, timestamp_writes: times.as_ref().map(gputimes::Slot::compute) });
+            label: None,
+            timestamp_writes: times.as_ref().map(gputimes::Slot::compute),
+        });
         pass.set_pipeline(if fast { o.fast_pipeline } else { o.pipeline });
         pass.set_bind_group(0, uniforms, &[offset]);
         pass.set_bind_group(1, group, &[]);
-        let rows = if fast && d[7] == 1 { d[6].div_ceil(2) } else { d[6] };
+        let rows = if fast && d[7] == 1 {
+            d[6].div_ceil(2)
+        } else {
+            d[6]
+        };
         pass.dispatch_workgroups(d[5].div_ceil(8), rows.div_ceil(8), 1);
         true
     }
@@ -235,7 +292,11 @@ impl Native {
         d.reading = None;
         let t = d.target.as_ref()?;
         let (w, h, stride) = (d.width, d.height, t.stride);
-        let mut e = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native read display") });
+        let mut e = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("native read display"),
+            });
         e.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: &t.texture,
@@ -245,9 +306,17 @@ impl Native {
             },
             wgpu::TexelCopyBufferInfo {
                 buffer: &t.readback,
-                layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride), rows_per_image: Some(h) },
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride),
+                    rows_per_image: Some(h),
+                },
             },
-            wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
         );
         gpu.queue.submit([e.finish()]);
         let bytes = stride as u64 * h as u64;
@@ -261,12 +330,19 @@ impl Native {
         #[cfg(target_arch = "wasm32")]
         crate::web::wait::map_read(&t.readback, 0..bytes, on_mapped);
         #[cfg(not(target_arch = "wasm32"))]
-        t.readback.map_async(wgpu::MapMode::Read, 0..bytes, on_mapped);
+        t.readback
+            .map_async(wgpu::MapMode::Read, 0..bytes, on_mapped);
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(err) = gpu.device.poll(wgpu::PollType::wait_indefinitely()) {
             crate::host::log(&format!("dhd_render: native read display: poll: {err}"));
         }
-        d.reading = Some(Read { w, h, stride, bytes, status });
+        d.reading = Some(Read {
+            w,
+            h,
+            stride,
+            bytes,
+            status,
+        });
         Some((w, h))
     }
 
@@ -290,7 +366,9 @@ impl Native {
         match status {
             Some(Ok(())) => {}
             Some(Err(err)) => {
-                crate::host::log(&format!("dhd_render: native read display: map failed: {err}"));
+                crate::host::log(&format!(
+                    "dhd_render: native read display: map failed: {err}"
+                ));
                 return false;
             }
             None => {

@@ -11,8 +11,27 @@ test('disabled online makes no connections',()=>{
   assert.equal(api.host_service_net_offered(),0);
   assert.equal(api.host_service_net_create_room(),-1);
   assert.equal(api.host_service_net_join_room(0),-1);
+  assert.equal(api.host_service_net_host_lan(),-1);
+  assert.equal(api.host_service_net_join_lan(0),-1);
   assert.equal(api.host_service_net_list_lobbies_start(8),0);
   assert.equal(made,0);
+});
+test('browser ABI matches the LAN connectivity and reconnect fields',()=>{
+  assert.equal(layout.NetMember.size,208);
+  assert.deepEqual(layout.NetMember.check_id,[184,8]);
+  assert.deepEqual(layout.NetMember.check_state,[192,4]);
+  assert.deepEqual(layout.NetMember.connection_state,[196,4]);
+  assert.deepEqual(layout.NetMember.reconnect_ms,[200,4]);
+  assert.deepEqual(layout.NetLobby.member,[168,2080]);
+  assert.deepEqual(layout.NetLobby.lan_address,[5396,64]);
+  assert.deepEqual(layout.NetLobby.check_id,[5464,8]);
+  assert.deepEqual(layout.NetLobby.check_deadline,[5472,8]);
+  assert.deepEqual(layout.NetLobby.check_valid,[5480,4]);
+  assert.deepEqual(layout.NetLobby.pin_required,[5484,4]);
+  assert.deepEqual(layout.NetLobby.reconnect_remaining_ms,[5488,4]);
+  assert.deepEqual(layout.NetLobby.reconnect_attempt,[5492,4]);
+  assert.deepEqual(layout.NetLobby.lan_room_id,[5496,17]);
+  assert.equal(layout.NetLobby.size,5520);
 });
 test('browser session messages and shared snapshots',()=>{
   const memory=new ArrayBuffer(32768),bytes=new Uint8Array(memory),dv=new DataView(memory);
@@ -37,13 +56,19 @@ test('browser session messages and shared snapshots',()=>{
   const recv=m=>socket.onmessage({data:JSON.stringify(m)});
   recv({type:'welcome',memberId:7,code:'TEST222',serverTime:1000,transport:'p2p'});
   recv({type:'room',phase:'intermission',hostId:7,nextRaceAt:31000,rules:{finishWindow:60,nextRace:'auto',then:'next'},
-    members:[{id:7,name:'Test',ready:true,inRace:false,finishTicks:360,place:4}],
+    members:[{id:7,name:'Test',ready:true,inRace:false,finishTicks:360,place:4},
+      {id:8,name:'Second',ready:false,inRace:false}],
     lastRace:{id:2,track:3,entrants:[{id:7,name:'Test',ticks:360,place:4}]}});
   api.host_service_net_get_lobby(1024);
   assert.equal(str(1024+layout.NetLobby.phase[0]),'intermission');
   assert.equal(dv.getFloat64(1024+layout.NetLobby.next_race_at[0],true),31000);
   assert.equal(dv.getInt32(1024+layout.NetLobby.state[0],true),2);
   assert.equal(dv.getInt32(1024+layout.NetLobby.is_p2p[0],true),1);
+  assert.equal(dv.getInt32(1024+layout.NetLobby.is_lan[0],true),0);
+  assert.equal(str(1024+layout.NetLobby.lan_address[0]),'');
+  const second=1024+layout.NetLobby.member[0]+layout.NetMember.size;
+  assert.equal(dv.getInt32(second+layout.NetMember.id[0],true),8);
+  assert.equal(str(second+layout.NetMember.name[0]),'Second');
   assert.equal(dv.getBigInt64(1024+layout.NetLobby.member[0]+layout.NetMember.finish_ticks[0],true),360n);
   // where the room runs and the members' regions (finding 135)
   recv({type:'where',region:'EU',colo:'FRA',members:[{id:7,region:'EU'}]});

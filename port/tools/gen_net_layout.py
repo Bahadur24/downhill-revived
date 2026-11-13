@@ -7,7 +7,8 @@ root = Path(__file__).resolve().parents[2]
 text = re.sub(r'/\*.*?\*/', '', (root / 'port/net/net.h').read_text(), flags=re.S)
 max_slots = int(re.search(r'NET_MAX_SLOTS\s*=\s*(\d+)', text).group(1))
 types = {'int': c.c_int32, 'unsigned': c.c_uint32, 'long long': c.c_int64,
-         'uint32_t': c.c_uint32, 'double': c.c_double, 'char': c.c_char, 'unsigned char': c.c_ubyte}
+         'uint32_t': c.c_uint32, 'uint64_t': c.c_uint64, 'double': c.c_double, 'char': c.c_char,
+         'unsigned char': c.c_ubyte}
 layout = {}
 for body, name in re.findall(r'typedef struct\s*{(.*?)}\s*(\w+);', text, flags=re.S):
     if name not in ('NetMember','NetRacer','NetResult','NetLobby','NetLobbyInfo'):

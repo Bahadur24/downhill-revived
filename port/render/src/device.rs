@@ -67,32 +67,56 @@ impl Gpu {
         #[cfg(not(all(feature = "native", not(target_arch = "wasm32"))))]
         {
             let _ = o;
-            Err("device::Gpu::create: native only (the browser's device comes from web/init.rs)".into())
+            Err(
+                "device::Gpu::create: native only (the browser's device comes from web/init.rs)"
+                    .into(),
+            )
         }
     }
 
     /// The `Gpu` of a device already made (natively by `create`; in the browser by the async
     /// init): the name and the features (dual-source as the device has it, RENDER_PIPELINES as
     /// `render_pipelines` says).
-    pub fn from_parts(instance: wgpu::Instance, adapter: wgpu::Adapter, device: wgpu::Device, queue: wgpu::Queue,
-                      options: DeviceOptions, render_pipelines: bool) -> Gpu {
+    pub fn from_parts(
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        options: DeviceOptions,
+        render_pipelines: bool,
+    ) -> Gpu {
         let info = adapter.get_info();
         let name = CString::new(info.name.replace('\0', "")).unwrap_or_default();
         let mut features = 0;
-        if device.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING) {
+        if device
+            .features()
+            .contains(wgpu::Features::DUAL_SOURCE_BLENDING)
+        {
             features |= DHDR_FEAT_DUAL_SOURCE;
         }
         if render_pipelines {
             features |= DHDR_FEAT_RENDER_PIPELINES;
         }
-        Gpu { instance, adapter, device, queue, info, name, features, options, shared: OnceLock::new() }
+        Gpu {
+            instance,
+            adapter,
+            device,
+            queue,
+            info,
+            name,
+            features,
+            options,
+            shared: OnceLock::new(),
+        }
     }
 }
 
 /// The DX12 compiler `o` asks for: FXC for `DHDR_DEV_FXC` or no dxcompiler.dll, else DXC from it.
 pub fn shader_compiler(o: &DeviceOptions) -> wgpu::Dx12Compiler {
     match &o.dxc_path {
-        Some(path) if o.flags & DHDR_DEV_FXC == 0 => wgpu::Dx12Compiler::DynamicDxc { dxc_path: path.clone() },
+        Some(path) if o.flags & DHDR_DEV_FXC == 0 => wgpu::Dx12Compiler::DynamicDxc {
+            dxc_path: path.clone(),
+        },
         _ => wgpu::Dx12Compiler::Fxc,
     }
 }
@@ -183,7 +207,11 @@ pub fn dual_source(offered: bool, vendor: u32, flags: u32) -> DualSource {
     } else if flags & DHDR_DEV_NO_DUAL_SOURCE != 0 {
         DualSource::Refused
     } else if vendor == VENDOR_INTEL {
-        if flags & DHDR_DEV_DUAL_SOURCE != 0 { DualSource::IntelForced } else { DualSource::IntelOff }
+        if flags & DHDR_DEV_DUAL_SOURCE != 0 {
+            DualSource::IntelForced
+        } else {
+            DualSource::IntelOff
+        }
     } else {
         DualSource::On
     }
@@ -233,10 +261,16 @@ mod native {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
         desc.backends = backends(o);
         desc.flags = instance_flags(o);
-        desc.memory_budget_thresholds = wgpu::MemoryBudgetThresholds { for_resource_creation: None, for_device_loss: None };
+        desc.memory_budget_thresholds = wgpu::MemoryBudgetThresholds {
+            for_resource_creation: None,
+            for_device_loss: None,
+        };
         desc.backend_options = wgpu::BackendOptions {
             gl: wgpu::GlBackendOptions::default(),
-            dx12: wgpu::Dx12BackendOptions { shader_compiler: compiler, ..Default::default() },
+            dx12: wgpu::Dx12BackendOptions {
+                shader_compiler: compiler,
+                ..Default::default()
+            },
             noop: wgpu::NoopBackendOptions::default(),
         };
         wgpu::Instance::new(desc)
@@ -257,15 +291,22 @@ mod native {
         let mut instance = instance(o, compiler.clone());
         let mut adapter = adapter(&instance, backends, o)?;
         if software_fxc(&compiler, &adapter.get_info()) {
-            crate::host::log("dhd_render: shaders for the WARP (software) adapter compiled with FXC, not DXC");
+            crate::host::log(
+                "dhd_render: shaders for the WARP (software) adapter compiled with FXC, not DXC",
+            );
             drop(adapter);
             instance = self::instance(o, wgpu::Dx12Compiler::Fxc);
             adapter = self::adapter(&instance, backends, o)?;
         }
         let info = adapter.get_info();
         // The driver in the log, for bug reports: many draw faults are one driver's.
-        crate::host::log(format!("gs: GPU {} on {:?}, driver {} {}", info.name, info.backend, info.driver,
-                                 info.driver_info).trim_end());
+        crate::host::log(
+            format!(
+                "gs: GPU {} on {:?}, driver {} {}",
+                info.name, info.backend, info.driver, info.driver_info
+            )
+            .trim_end(),
+        );
         log_adapters(&instance, backends, &info);
         // DHD_RSTAT (finding 108): whether the adapter offers GPU timers at all. The 120 field/s
         // round had to estimate GPU time from the render thread's blocked submits because nothing
@@ -282,19 +323,36 @@ mod native {
                 has(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES)
             ));
         }
-        let choice = dual_source(adapter.features().contains(wgpu::Features::DUAL_SOURCE_BLENDING), info.vendor, o.flags);
+        let choice = dual_source(
+            adapter
+                .features()
+                .contains(wgpu::Features::DUAL_SOURCE_BLENDING),
+            info.vendor,
+            o.flags,
+        );
         if let Some(line) = choice.log_line(&info.name) {
             crate::host::log(&line);
         }
         let dual = choice.used();
-        let timers = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
-        let timers = if std::env::var_os("DHD_GPU_TIMING").is_some() && adapter.features().contains(timers) {
+        let timers =
+            wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        let timers = if std::env::var_os("DHD_GPU_TIMING").is_some()
+            && adapter.features().contains(timers)
+        {
             timers
-        } else { wgpu::Features::empty() };
-        let mut features = if dual { wgpu::Features::DUAL_SOURCE_BLENDING } else { wgpu::Features::empty() };
+        } else {
+            wgpu::Features::empty()
+        };
+        let mut features = if dual {
+            wgpu::Features::DUAL_SOURCE_BLENDING
+        } else {
+            wgpu::Features::empty()
+        };
         // DHD_GPU_TIMES (diagnostics: native/pipelines.rs's gputimes), and the perf: lines' GPU time
         // (finding 129), where the adapter has timestamp queries.
-        if crate::native::pipelines::gputimes::wanted() || crate::native::pipelines::gputimes::perf_on() {
+        if crate::native::pipelines::gputimes::wanted()
+            || crate::native::pipelines::gputimes::perf_on()
+        {
             features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
         }
         // DHD_GPU_STATS (diagnostics: native/gpu_stats.rs), where the adapter has all of them.
@@ -314,16 +372,34 @@ mod native {
         crate::guard::install_error_handler(&device);
         crate::lost::watch(&device);
         let render_pipelines = pollster::block_on(render_probe(&device).pop()).is_none();
-        Ok(Gpu::from_parts(instance, adapter, device, queue, o.clone(), render_pipelines))
+        Ok(Gpu::from_parts(
+            instance,
+            adapter,
+            device,
+            queue,
+            o.clone(),
+            render_pipelines,
+        ))
     }
 
     /// Every adapter of these backends, of what kind, and the one the game runs on (finding 129):
     /// on a laptop with two GPUs, whether the game took the integrated one.
-    fn log_adapters(instance: &wgpu::Instance, backends: wgpu::Backends, picked: &wgpu::AdapterInfo) {
-        let all: Vec<wgpu::AdapterInfo> =
-            pollster::block_on(instance.enumerate_adapters(backends)).iter().map(|a| a.get_info()).collect();
-        let list: Vec<String> = all.iter().map(|i| format!("{} ({})", i.name, kind_name(i.device_type))).collect();
-        let discrete = all.iter().any(|i| i.device_type == wgpu::DeviceType::DiscreteGpu);
+    fn log_adapters(
+        instance: &wgpu::Instance,
+        backends: wgpu::Backends,
+        picked: &wgpu::AdapterInfo,
+    ) {
+        let all: Vec<wgpu::AdapterInfo> = pollster::block_on(instance.enumerate_adapters(backends))
+            .iter()
+            .map(|a| a.get_info())
+            .collect();
+        let list: Vec<String> = all
+            .iter()
+            .map(|i| format!("{} ({})", i.name, kind_name(i.device_type)))
+            .collect();
+        let discrete = all
+            .iter()
+            .any(|i| i.device_type == wgpu::DeviceType::DiscreteGpu);
         let hint = if discrete && picked.device_type != wgpu::DeviceType::DiscreteGpu {
             if cfg!(windows) {
                 "; a discrete GPU is there but not used (Windows Settings > System > Display > Graphics: the game, High performance)"
@@ -333,8 +409,12 @@ mod native {
         } else {
             ""
         };
-        crate::host::log(&format!("gs: GPUs: {}; the game runs on {} ({}){hint}", list.join(", "), picked.name,
-                                  kind_name(picked.device_type)));
+        crate::host::log(&format!(
+            "gs: GPUs: {}; the game runs on {} ({}){hint}",
+            list.join(", "),
+            picked.name,
+            kind_name(picked.device_type)
+        ));
     }
 
     /// Whether DXC was asked for and the adapter is WARP (a software DX12 adapter: CPU type, or
@@ -345,19 +425,28 @@ mod native {
     fn software_fxc(compiler: &wgpu::Dx12Compiler, info: &wgpu::AdapterInfo) -> bool {
         matches!(compiler, wgpu::Dx12Compiler::DynamicDxc { .. })
             && info.backend == wgpu::Backend::Dx12
-            && (info.device_type == wgpu::DeviceType::Cpu || (info.vendor == 0x1414 && info.device == 0x8C))
+            && (info.device_type == wgpu::DeviceType::Cpu
+                || (info.vendor == 0x1414 && info.device == 0x8C))
     }
 
     /// gpu_wgpu.c:163-189: the fallback (WARP) adapter for `DHDR_DEV_FALLBACK`; else the
     /// enumerated adapter with the presentation adapter's PCI ids (never a CPU one); else the
     /// high-performance one.
-    fn adapter(instance: &wgpu::Instance, backends: wgpu::Backends, o: &DeviceOptions) -> Result<wgpu::Adapter, String> {
+    fn adapter(
+        instance: &wgpu::Instance,
+        backends: wgpu::Backends,
+        o: &DeviceOptions,
+    ) -> Result<wgpu::Adapter, String> {
         let fallback = o.flags & DHDR_DEV_FALLBACK != 0;
         if !fallback && o.vendor_id != 0 {
-            let found = pollster::block_on(instance.enumerate_adapters(backends)).into_iter().find(|a| {
-                let i = a.get_info();
-                i.vendor == o.vendor_id && i.device == o.device_id && i.device_type != wgpu::DeviceType::Cpu
-            });
+            let found = pollster::block_on(instance.enumerate_adapters(backends))
+                .into_iter()
+                .find(|a| {
+                    let i = a.get_info();
+                    i.vendor == o.vendor_id
+                        && i.device == o.device_id
+                        && i.device_type != wgpu::DeviceType::Cpu
+                });
             if let Some(a) = found {
                 return Ok(a);
             }
@@ -367,7 +456,12 @@ mod native {
             force_fallback_adapter: fallback,
             compatible_surface: None,
         }))
-        .map_err(|e| format!("no {}adapter ({backends:?}): {e}", if fallback { "fallback " } else { "" }))
+        .map_err(|e| {
+            format!(
+                "no {}adapter ({backends:?}): {e}",
+                if fallback { "fallback " } else { "" }
+            )
+        })
     }
 }
 
@@ -473,7 +567,8 @@ pub fn features() -> u32 {
 #[no_mangle]
 pub extern "C" fn dhdr_device_max_texture() -> u32 {
     let _g = crate::guard::Guard::enter("dhdr_device_max_texture");
-    GPU.get().map_or(0, |g| g.device.limits().max_texture_dimension_2d)
+    GPU.get()
+        .map_or(0, |g| g.device.limits().max_texture_dimension_2d)
 }
 
 /// `DHDR_FEAT_DUAL_SOURCE` of `g`.
@@ -509,7 +604,10 @@ mod tests {
             (false, VENDOR_INTEL, force, NotOffered),
         ] {
             let got = dual_source(offered, vendor, flags);
-            assert_eq!(got, want, "offered {offered} vendor {vendor:#06x} flags {flags:#x}");
+            assert_eq!(
+                got, want,
+                "offered {offered} vendor {vendor:#06x} flags {flags:#x}"
+            );
             assert_eq!(got.used(), matches!(want, On | IntelForced));
         }
     }
@@ -517,10 +615,18 @@ mod tests {
     /// One dhd.log line exactly when the Intel rule decided.
     #[test]
     fn dual_source_log_line() {
-        let off = DualSource::IntelOff.log_line("Intel(R) UHD Graphics").unwrap();
-        assert!(off.starts_with("gs: dual-source blending off on Intel(R) UHD Graphics"), "{off}");
+        let off = DualSource::IntelOff
+            .log_line("Intel(R) UHD Graphics")
+            .unwrap();
+        assert!(
+            off.starts_with("gs: dual-source blending off on Intel(R) UHD Graphics"),
+            "{off}"
+        );
         assert!(off.contains("DHD_WGPU_DUAL_SOURCE=1"), "{off}");
-        assert!(DualSource::IntelForced.log_line("x").unwrap().contains("DHD_WGPU_DUAL_SOURCE=1"));
+        assert!(DualSource::IntelForced
+            .log_line("x")
+            .unwrap()
+            .contains("DHD_WGPU_DUAL_SOURCE=1"));
         for quiet in [DualSource::On, DualSource::Refused, DualSource::NotOffered] {
             assert_eq!(quiet.log_line("x"), None);
         }

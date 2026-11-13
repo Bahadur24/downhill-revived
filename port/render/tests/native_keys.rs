@@ -15,7 +15,9 @@
 mod common;
 use common::*;
 use dhd_render::native::pipelines::{self, blend_factor, blend_operation, describe, PipelineDesc};
-use wgpu::{BlendComponent, BlendFactor as F, BlendOperation as O, BlendState, CompareFunction as C};
+use wgpu::{
+    BlendComponent, BlendFactor as F, BlendOperation as O, BlendState, CompareFunction as C,
+};
 
 /// WGPUBlendFactor (webgpu.h v29) as wgpu-native maps it.
 fn factor(n: u64) -> F {
@@ -74,8 +76,14 @@ fn ok(key: u32) -> PipelineDesc {
 }
 
 fn blend(src: u64, dst: u64, op: O) -> Option<BlendState> {
-    Some(BlendState { color: BlendComponent { src_factor: factor(src), dst_factor: factor(dst), operation: op },
-                      alpha: BlendComponent::REPLACE })
+    Some(BlendState {
+        color: BlendComponent {
+            src_factor: factor(src),
+            dst_factor: factor(dst),
+            operation: op,
+        },
+        alpha: BlendComponent::REPLACE,
+    })
 }
 
 #[test]
@@ -85,8 +93,16 @@ fn factors() {
     assert_eq!(factors.len(), 32);
     for (d3d, f) in factors.iter().enumerate() {
         assert_eq!(f.get("d3d").u(), d3d as u64);
-        assert_eq!(blend_factor(d3d as u32, false), factor(f.get("plain").u()), "D3D11 factor {d3d}, plain");
-        assert_eq!(blend_factor(d3d as u32, true), factor(f.get("dual").u()), "D3D11 factor {d3d}, dual");
+        assert_eq!(
+            blend_factor(d3d as u32, false),
+            factor(f.get("plain").u()),
+            "D3D11 factor {d3d}, plain"
+        );
+        assert_eq!(
+            blend_factor(d3d as u32, true),
+            factor(f.get("dual").u()),
+            "D3D11 factor {d3d}, dual"
+        );
     }
 }
 
@@ -97,15 +113,27 @@ fn operations() {
     assert_eq!(ops.len(), 8);
     for (d3d, o) in ops.iter().enumerate() {
         assert_eq!(o.get("d3d").u(), d3d as u64);
-        assert_eq!(blend_operation(d3d as u32), operation(o.get("wgpu").u()), "D3D11 operation {d3d}");
+        assert_eq!(
+            blend_operation(d3d as u32),
+            operation(o.get("wgpu").u()),
+            "D3D11 operation {d3d}"
+        );
     }
 }
 
 #[test]
 fn blend_keys() {
     let data = data("native_keys.json");
-    let fields: Vec<&str> = data.get("blend_fields").arr().iter().map(|f| f.str()).collect();
-    assert_eq!(fields, ["key", "operation", "src", "dst", "src_dual", "dst_dual"]);
+    let fields: Vec<&str> = data
+        .get("blend_fields")
+        .arr()
+        .iter()
+        .map(|f| f.str())
+        .collect();
+    assert_eq!(
+        fields,
+        ["key", "operation", "src", "dst", "src_dual", "dst_dual"]
+    );
     let keys = data.get("blend_keys").arr();
     assert_eq!(keys.len(), 8192);
     for row in keys {
@@ -115,23 +143,49 @@ fn blend_keys() {
         let (plain, dual) = (k | 15 << 14, k | 15 << 14 | pipelines::VARIANT_DUAL << 23);
         match operation(r[1]) {
             None => {
-                assert!(describe(plain).is_err(), "key {plain:#09x}: operation {} is refused", r[1]);
-                assert!(describe(dual).is_err(), "key {dual:#09x}: operation {} is refused", r[1]);
+                assert!(
+                    describe(plain).is_err(),
+                    "key {plain:#09x}: operation {} is refused",
+                    r[1]
+                );
+                assert!(
+                    describe(dual).is_err(),
+                    "key {dual:#09x}: operation {} is refused",
+                    r[1]
+                );
             }
             Some(op) => {
-                assert_eq!(ok(plain).color.blend, blend(r[2], r[3], op), "key {plain:#09x}");
-                assert_eq!(ok(dual).color.blend, blend(r[4], r[5], op), "key {dual:#09x} (dual)");
+                assert_eq!(
+                    ok(plain).color.blend,
+                    blend(r[2], r[3], op),
+                    "key {plain:#09x}"
+                );
+                assert_eq!(
+                    ok(dual).color.blend,
+                    blend(r[4], r[5], op),
+                    "key {dual:#09x} (dual)"
+                );
             }
         }
         // The same key with blending off: no blend state, whatever its fields (C ignores them).
-        assert_eq!(ok((k & !1) | 15 << 14).color.blend, None, "key {:#09x}", (k & !1) | 15 << 14);
+        assert_eq!(
+            ok((k & !1) | 15 << 14).color.blend,
+            None,
+            "key {:#09x}",
+            (k & !1) | 15 << 14
+        );
     }
 }
 
 #[test]
 fn depth_states() {
     let data = data("native_keys.json");
-    let fields: Vec<&str> = data.get("depth_fields").arr().iter().map(|f| f.str()).collect();
+    let fields: Vec<&str> = data
+        .get("depth_fields")
+        .arr()
+        .iter()
+        .map(|f| f.str())
+        .collect();
     assert_eq!(fields, ["depth", "attached", "write", "compare"]);
     let states = data.get("depth_states").arr();
     assert_eq!(states.len(), 32);
@@ -161,7 +215,8 @@ fn write_masks() {
     assert_eq!(masks.len(), 16);
     for m in masks {
         let key = 1 | (m.get("mask").u() as u32) << 14;
-        let want = wgpu::ColorWrites::from_bits(m.get("wgpu").u() as u32).expect("WGPUColorWriteMask bits");
+        let want = wgpu::ColorWrites::from_bits(m.get("wgpu").u() as u32)
+            .expect("WGPUColorWriteMask bits");
         let d = ok(key);
         assert_eq!(d.color.write_mask, want, "mask {}", m.get("mask").u());
         assert_eq!(d.color.format, wgpu::TextureFormat::Rgba8Unorm);
@@ -173,16 +228,29 @@ fn variants() {
     let data = data("native_keys.json");
     let variants = data.get("variants").arr();
     assert_eq!(variants.len(), 4);
-    let names = [pipelines::VARIANT_PLAIN, pipelines::VARIANT_DUAL, pipelines::VARIANT_RGB_A128, pipelines::VARIANT_ALPHA_ONLY];
+    let names = [
+        pipelines::VARIANT_PLAIN,
+        pipelines::VARIANT_DUAL,
+        pipelines::VARIANT_RGB_A128,
+        pipelines::VARIANT_ALPHA_ONLY,
+    ];
     for (v, want) in variants.iter().enumerate() {
         assert_eq!(want.get("variant").u(), v as u64);
         assert_eq!(names[v], v as u32);
         let key = 1 | 5 << 1 | 6 << 6 | 1 << 11 | 15 << 14 | (v as u32) << 23;
         let d = ok(key);
         assert_eq!(d.entry, want.get("entry").str(), "variant {v}: entry");
-        assert_eq!(d.dual_module, want.get("module").str() == "dual", "variant {v}: module");
+        assert_eq!(
+            d.dual_module,
+            want.get("module").str() == "dual",
+            "variant {v}: module"
+        );
         assert_ne!(want.get("module").str(), "other");
-        assert_eq!(d.color.blend.is_some(), want.get("blend").u() != 0, "variant {v}: blend state");
+        assert_eq!(
+            d.color.blend.is_some(),
+            want.get("blend").u() != 0,
+            "variant {v}: blend state"
+        );
         assert_eq!(d.color.format, wgpu::TextureFormat::Rgba8Unorm);
     }
 }

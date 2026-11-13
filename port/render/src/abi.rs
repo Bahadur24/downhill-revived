@@ -185,7 +185,13 @@ pub struct DhdrConvertConstants {
 
 impl Default for DhdrConvertConstants {
     fn default() -> Self {
-        DhdrConvertConstants { tex: [0; 4], size: [0; 4], slot: [[0; 4]; 4], pages: [0; 512], palette: [0; 256] }
+        DhdrConvertConstants {
+            tex: [0; 4],
+            size: [0; 4],
+            slot: [[0; 4]; 4],
+            pages: [0; 512],
+            palette: [0; 256],
+        }
     }
 }
 
@@ -344,61 +350,127 @@ pub type dhdr_version_fn = unsafe extern "C" fn() -> *const c_char;
 
 pub type dhdr_exact_create_fn = unsafe extern "C" fn(raster_flags: u32) -> *mut DhdrExact;
 pub type dhdr_exact_destroy_fn = unsafe extern "C" fn(x: *mut DhdrExact);
-pub type dhdr_exact_write_fn =
-    unsafe extern "C" fn(x: *mut DhdrExact, buffer: u32, offset: u32, data: *const c_void, bytes: u32);
-pub type dhdr_exact_copy_fn =
-    unsafe extern "C" fn(x: *mut DhdrExact, from: u32, from_offset: u32, to: u32, to_offset: u32, bytes: u32);
-pub type dhdr_exact_batch_fn = unsafe extern "C" fn(x: *mut DhdrExact, dynamic_offset: u32, groups_x: u32, groups_y: u32);
-pub type dhdr_exact_record_fn = unsafe extern "C" fn(x: *mut DhdrExact, pipeline: u32, x_word: u32, y_word: u32);
+pub type dhdr_exact_write_fn = unsafe extern "C" fn(
+    x: *mut DhdrExact,
+    buffer: u32,
+    offset: u32,
+    data: *const c_void,
+    bytes: u32,
+);
+pub type dhdr_exact_copy_fn = unsafe extern "C" fn(
+    x: *mut DhdrExact,
+    from: u32,
+    from_offset: u32,
+    to: u32,
+    to_offset: u32,
+    bytes: u32,
+);
+pub type dhdr_exact_batch_fn =
+    unsafe extern "C" fn(x: *mut DhdrExact, dynamic_offset: u32, groups_x: u32, groups_y: u32);
+pub type dhdr_exact_record_fn =
+    unsafe extern "C" fn(x: *mut DhdrExact, pipeline: u32, x_word: u32, y_word: u32);
 pub type dhdr_exact_submit_fn = unsafe extern "C" fn(x: *mut DhdrExact);
-pub type dhdr_exact_read_begin_fn = unsafe extern "C" fn(x: *mut DhdrExact, buffer: u32, want: *const u32) -> i32;
-pub type dhdr_exact_read_finish_fn =
-    unsafe extern "C" fn(x: *mut DhdrExact, buffer: u32, want: *const u32, image: *mut c_void) -> i32;
-pub type dhdr_exact_capture_begin_fn = unsafe extern "C" fn(x: *mut DhdrExact, w: *mut u32, h: *mut u32) -> i32;
-pub type dhdr_exact_capture_finish_fn = unsafe extern "C" fn(x: *mut DhdrExact, pixels: *mut u32) -> i32;
+pub type dhdr_exact_read_begin_fn =
+    unsafe extern "C" fn(x: *mut DhdrExact, buffer: u32, want: *const u32) -> i32;
+pub type dhdr_exact_read_finish_fn = unsafe extern "C" fn(
+    x: *mut DhdrExact,
+    buffer: u32,
+    want: *const u32,
+    image: *mut c_void,
+) -> i32;
+pub type dhdr_exact_capture_begin_fn =
+    unsafe extern "C" fn(x: *mut DhdrExact, w: *mut u32, h: *mut u32) -> i32;
+pub type dhdr_exact_capture_finish_fn =
+    unsafe extern "C" fn(x: *mut DhdrExact, pixels: *mut u32) -> i32;
 pub type dhdr_exact_stats_fn = unsafe extern "C" fn(x: *const DhdrExact, out: *mut DhdrExactStats);
 
-pub type dhdr_surface_create_fn = unsafe extern "C" fn(w: *const DhdrWindow, present_flags: u32) -> *mut DhdrSurface;
+pub type dhdr_surface_create_fn =
+    unsafe extern "C" fn(w: *const DhdrWindow, present_flags: u32) -> *mut DhdrSurface;
 pub type dhdr_surface_destroy_fn = unsafe extern "C" fn(s: *mut DhdrSurface);
 pub type dhdr_surface_usage_fn = unsafe extern "C" fn(s: *const DhdrSurface) -> u32;
-pub type dhdr_present_exact_fn = unsafe extern "C" fn(s: *mut DhdrSurface, x: *mut DhdrExact, pixels: *const u32,
-                                                      w: u32, h: u32, window_w: u32, window_h: u32) -> i32;
-pub type dhdr_surface_counter_fn =
-    unsafe extern "C" fn(s: *mut DhdrSurface, enabled: i32, server_ms: i32, race_ms: i32, riders_ms: i32, seconds: f64);
-pub type dhdr_surface_touch_fn =
-    unsafe extern "C" fn(s: *mut DhdrSurface, items: *const f32, count: u32, width_mm: f32, height_mm: f32);
+pub type dhdr_present_exact_fn = unsafe extern "C" fn(
+    s: *mut DhdrSurface,
+    x: *mut DhdrExact,
+    pixels: *const u32,
+    w: u32,
+    h: u32,
+    window_w: u32,
+    window_h: u32,
+) -> i32;
+pub type dhdr_surface_counter_fn = unsafe extern "C" fn(
+    s: *mut DhdrSurface,
+    enabled: i32,
+    server_ms: i32,
+    race_ms: i32,
+    riders_ms: i32,
+    seconds: f64,
+);
+pub type dhdr_surface_touch_fn = unsafe extern "C" fn(
+    s: *mut DhdrSurface,
+    items: *const f32,
+    count: u32,
+    width_mm: f32,
+    height_mm: f32,
+);
 pub type dhdr_surface_present_fn = unsafe extern "C" fn(s: *mut DhdrSurface);
 
 pub type dhdr_native_create_fn = unsafe extern "C" fn(flags: u32) -> *mut DhdrNative;
 pub type dhdr_native_destroy_fn = unsafe extern "C" fn(n: *mut DhdrNative);
-pub type dhdr_texture_create_fn = unsafe extern "C" fn(rgba: *const u32, w: u32, h: u32) -> *mut DhdrTexture;
+pub type dhdr_texture_create_fn =
+    unsafe extern "C" fn(rgba: *const u32, w: u32, h: u32) -> *mut DhdrTexture;
 pub type dhdr_replace_create_fn =
     unsafe extern "C" fn(rgba_mips: *const u8, w: u32, h: u32, levels: u32) -> *mut DhdrTexture;
 pub type dhdr_texture_retain_fn = unsafe extern "C" fn(t: *mut DhdrTexture);
 pub type dhdr_texture_release_fn = unsafe extern "C" fn(t: *mut DhdrTexture);
-pub type dhdr_native_surface_fn = unsafe extern "C" fn(n: *mut DhdrNative, index: u32, scale: u32, w: u32, h: u32,
-                                                       depth: u32, size_out: *mut u32) -> i32;
-pub type dhdr_native_picture_fn =
-    unsafe extern "C" fn(n: *mut DhdrNative, p: *const DhdrPicture, out: *mut DhdrPictureResult) -> i32;
+pub type dhdr_native_surface_fn = unsafe extern "C" fn(
+    n: *mut DhdrNative,
+    index: u32,
+    scale: u32,
+    w: u32,
+    h: u32,
+    depth: u32,
+    size_out: *mut u32,
+) -> i32;
+pub type dhdr_native_picture_fn = unsafe extern "C" fn(
+    n: *mut DhdrNative,
+    p: *const DhdrPicture,
+    out: *mut DhdrPictureResult,
+) -> i32;
 pub type dhdr_native_present_fn =
     unsafe extern "C" fn(n: *mut DhdrNative, s: *mut DhdrSurface, r: *const DhdrPresentRect) -> i32;
-pub type dhdr_native_read_begin_fn = unsafe extern "C" fn(n: *mut DhdrNative, w: *mut u32, h: *mut u32) -> i32;
-pub type dhdr_native_read_finish_fn = unsafe extern "C" fn(n: *mut DhdrNative, pixels: *mut u32) -> i32;
+pub type dhdr_native_read_begin_fn =
+    unsafe extern "C" fn(n: *mut DhdrNative, w: *mut u32, h: *mut u32) -> i32;
+pub type dhdr_native_read_finish_fn =
+    unsafe extern "C" fn(n: *mut DhdrNative, pixels: *mut u32) -> i32;
 pub type dhdr_native_options_fn = unsafe extern "C" fn(n: *mut DhdrNative, flags: u32);
-pub type dhdr_native_zread_start_fn = unsafe extern "C" fn(n: *mut DhdrNative, index: u32, rect: *const u32, tag: u64) -> i32;
-pub type dhdr_native_zread_take_fn =
-    unsafe extern "C" fn(n: *mut DhdrNative, out: *mut u32, cap: u32, rect_out: *mut u32, tag_out: *mut u64) -> i32;
+pub type dhdr_native_zread_start_fn =
+    unsafe extern "C" fn(n: *mut DhdrNative, index: u32, rect: *const u32, tag: u64) -> i32;
+pub type dhdr_native_zread_take_fn = unsafe extern "C" fn(
+    n: *mut DhdrNative,
+    out: *mut u32,
+    cap: u32,
+    rect_out: *mut u32,
+    tag_out: *mut u64,
+) -> i32;
 
 /// The texture packs' PNG files, native only.
-pub type dhdr_png_size_fn = unsafe extern "C" fn(data: *const u8, size: usize, w: *mut u32, h: *mut u32) -> i32;
-pub type dhdr_png_decode_fn =
-    unsafe extern "C" fn(data: *const u8, size: usize, rgba: *mut u8, w: u32, h: u32, opaque: u32) -> i32;
+pub type dhdr_png_size_fn =
+    unsafe extern "C" fn(data: *const u8, size: usize, w: *mut u32, h: *mut u32) -> i32;
+pub type dhdr_png_decode_fn = unsafe extern "C" fn(
+    data: *const u8,
+    size: usize,
+    rgba: *mut u8,
+    w: u32,
+    h: u32,
+    opaque: u32,
+) -> i32;
 
 /// wasm only.
 pub type dhdr_web_surface_fn = unsafe extern "C" fn() -> *mut DhdrSurface;
 
 /// Test hooks (feature `test-hooks`), native only.
-pub type dhdr_test_depth_probe_fn = unsafe extern "C" fn(cases: *const c_void, count: u32, results: *mut u32) -> i32;
+pub type dhdr_test_depth_probe_fn =
+    unsafe extern "C" fn(cases: *const c_void, count: u32, results: *mut u32) -> i32;
 pub type dhdr_test_presented_fn = unsafe extern "C" fn(w: *mut u32, h: *mut u32) -> *const u32;
 
 // ---------------- compile-time layout ----------------

@@ -301,6 +301,16 @@ def android_ndk():
     return ndk
 
 
+def android_toolchain_bin(ndk=None):
+    """The NDK's host tools for Linux or Windows x86-64."""
+    ndk = ndk or android_ndk()
+    host = 'windows-x86_64' if os.name == 'nt' else 'linux-x86_64'
+    path = ndk / 'toolchains' / 'llvm' / 'prebuilt' / host / 'bin'
+    if not path.is_dir():
+        sys.exit('SDL3: NDK %s has no host toolchain at %s' % (ndk, path))
+    return path
+
+
 def android_build():
     """libSDL3.so for Android arm64-v8a (API ANDROID_API), its include directory and the Java
     sources of the same release (android-project/app/src/main/java: SDLActivity and friends, which

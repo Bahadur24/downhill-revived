@@ -25,7 +25,10 @@ pub const LOGO: &str = "logo";
 pub const LOGO_TEXT: &str = "Downhill Revived";
 /// The two buttons other people see on the profile.
 pub const BUTTONS: [(&str, &str); 2] = [
-    ("Get Downhill Revived", "https://downhill-revived.pages.dev/"),
+    (
+        "Get Downhill Revived",
+        "https://downhill-revived.pages.dev/",
+    ),
     ("Join the Discord", "https://discord.gg/XrSeTyzfr2"),
 ];
 /// The shortest time between two updates, and between two tries to reach Discord.
@@ -121,8 +124,15 @@ pub fn ordinal(n: u32) -> String {
 /// The two lines for `s`, its elapsed time counted from `start`. None: nothing to show.
 pub fn payload(s: &State, start: i64) -> Option<Payload> {
     let track = track_name(&s.track);
-    let on = |what: &str| if track.is_empty() { what.to_string() } else { format!("{what}: {track}") };
-    let place = (s.place > 0 && s.riders > 1 && s.place <= s.riders).then(|| format!("{} of {}", ordinal(s.place), s.riders));
+    let on = |what: &str| {
+        if track.is_empty() {
+            what.to_string()
+        } else {
+            format!("{what}: {track}")
+        }
+    };
+    let place = (s.place > 0 && s.riders > 1 && s.place <= s.riders)
+        .then(|| format!("{} of {}", ordinal(s.place), s.riders));
     let (details, state) = match s.kind {
         Kind::None => return None,
         Kind::Menus => ("In menus".to_string(), None),
@@ -131,12 +141,20 @@ pub fn payload(s: &State, start: i64) -> Option<Payload> {
         Kind::OnlineRace => (on("Online race"), place),
         // a private room comes without its code (port/hle/presence.c keeps it): no code shown
         Kind::Room => (
-            if s.room.is_empty() { "Online room".to_string() } else { format!("Online room {}", s.room) },
+            if s.room.is_empty() {
+                "Online room".to_string()
+            } else {
+                format!("Online room {}", s.room)
+            },
             (s.max_members > 0).then(|| format!("{}/{} riders", s.members, s.max_members)),
         ),
         Kind::Movie => ("Watching a movie".to_string(), None),
     };
-    Some(Payload { details, state, start })
+    Some(Payload {
+        details,
+        state,
+        start,
+    })
 }
 
 /// Where the elapsed time starts: the session's start, and for a race the moment it began (a new
@@ -149,7 +167,10 @@ pub struct Clock {
 
 impl Clock {
     pub fn new(session: i64) -> Clock {
-        Clock { session, race: None }
+        Clock {
+            session,
+            race: None,
+        }
     }
 
     pub fn start(&mut self, s: &State, now: i64) -> i64 {
@@ -195,7 +216,10 @@ impl Pacer {
         if self.wanted == self.shown {
             return Due::Nothing;
         }
-        match self.last.map(|t| (t + MIN_GAP).saturating_duration_since(now)) {
+        match self
+            .last
+            .map(|t| (t + MIN_GAP).saturating_duration_since(now))
+        {
             Some(wait) if !wait.is_zero() => Due::Wait(wait),
             _ => Due::Send(self.wanted.clone()),
         }
@@ -220,8 +244,12 @@ impl Pacer {
 /// Whether DHD_DISCORD's value (None: not set) turns the presence on, as the game reads the
 /// switch (dhd_settings: an off word is off, anything else on; unset, the built-in value).
 pub fn enabled(setting: Option<&str>) -> bool {
-    let Some(s) = dhd_settings::table::find("discord") else { return false };
-    let value = setting.filter(|v| !v.trim().is_empty()).unwrap_or(s.builtin);
+    let Some(s) = dhd_settings::table::find("discord") else {
+        return false;
+    };
+    let value = setting
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(s.builtin);
     s.canonical(value) == Some("on")
 }
 

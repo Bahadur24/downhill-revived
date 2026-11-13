@@ -150,6 +150,33 @@ Online:
 | `DHD_NET_TEST_DROP=S` | the room connection is cut once per room, S seconds after a race's start moment (negative: during its setup, the start message comes 3 s before), with no close frame as a network drop; the game must rejoin and race on (finding 175) |
 | `DHD_NET_TEST_PONG_DELAY=N[@S]` | from S seconds (default 60) after joining a room, every pong this PC gets (the room's and the race's PONG) is held N ms plus 0-N/2 ms more before it counts: a slow return path one way, for the shared clock (finding 175) |
 
+## Android Wi-Fi LAN and Tailscale rooms
+
+The in-progress Android LAN work is checked at the Rust room-service layer with the `dhd_net`
+library tests (offline and serial, because tests share process state), formatting checks, ABI layout
+checks, and the Android arm64 debug build. Tests cover Tailnet IPv4/peer validation and cancelling
+or suppressing UDP discovery while Tailnet mode is active. The room service also checks the host
+role before honoring a kick request. The Wi-Fi LAN flow remains a separate mode with its own
+discovery and Wi-Fi address choice.
+
+For this branch, the `dhd_net` suite passed with 59 tests, 0 failures, and 10 ignored; crate
+formatting and the four-target network ABI layout check passed. The WASM core passed its strict
+build/link step with LLVM 23.1. In `python port/tools/test_runtime.py`, the ABI, signature, guest,
+and semantic checks passed; the run then stopped at the native host tests because their low-level
+programs require Windows (`NotImplementedError: low host test programs need Windows`). This is a
+platform limit, so do not report the entire port runtime suite as passing on Linux.
+
+The Android debug build also succeeded from the fresh core using NDK 27.2.12479018. The resulting
+APK was checked with `aapt` and `apksigner`: `app.downhillrevived` 0.7.16 (versionCode 716),
+minSdk 29, arm64-v8a only, debug-signed with a valid v2 signature. This verifies packaging and
+signing, not installation or network play on a device.
+
+These checks do not prove that two phones can race through a home internet connection. A device test
+must connect both Android devices to Tailscale, check VPN/split-tunnel routing and any tailnet ACL,
+have the host enter their `100.64.0.0/10` address, and have the guest enter the host's displayed
+runtime TCP `IP:port`. There is no automatic Tailscale peer discovery. Test Wi-Fi LAN discovery
+separately; see finding 199 for implementation details and current results.
+
 Pictures:
 
 | Variable | What |

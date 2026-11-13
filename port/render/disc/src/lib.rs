@@ -30,7 +30,8 @@ pub const SECTOR: u64 = 2048;
 /// The game files hash of Downhill Domination (USA), SCUS-97177: redump disc 30393's image, whose
 /// whole-file SHA-256 is 0fe2b77713d3440cc3030741ea0b18f49e3feaa09671a30a421e0d4888a7eb86. The one
 /// online races take (online_menu.c us_files_sha256).
-pub const USA_FILES_SHA256: &str = "c8c17bcae383daf9f2feadc7f6d7476c43d659ab8d66127a299b01311f2a3476";
+pub const USA_FILES_SHA256: &str =
+    "c8c17bcae383daf9f2feadc7f6d7476c43d659ab8d66127a299b01311f2a3476";
 /// How many files that disc has.
 pub const USA_FILE_COUNT: usize = 2338;
 /// The first 4 bytes of the SHA-256 of each of the USA disc's file records (`record`), sorted: they
@@ -120,7 +121,10 @@ impl Files {
             note.push(format!("{path} isn't the USA disc's"));
         }
         if self.count != USA_FILE_COUNT {
-            note.push(format!("{} files, the USA disc has {USA_FILE_COUNT}", self.count));
+            note.push(format!(
+                "{} files, the USA disc has {USA_FILE_COUNT}",
+                self.count
+            ));
         }
         note.join("; ")
     }
@@ -135,7 +139,12 @@ fn le32(b: &[u8]) -> u32 {
 }
 
 /// size bytes from sector on; a read past the image's end is a cut dump (what names it).
-fn read_at(r: &mut (impl Read + Seek), sector: u32, buf: &mut [u8], what: &str) -> Result<(), Error> {
+fn read_at(
+    r: &mut (impl Read + Seek),
+    sector: u32,
+    buf: &mut [u8],
+    what: &str,
+) -> Result<(), Error> {
     r.seek(SeekFrom::Start(sector as u64 * SECTOR))?;
     r.read_exact(buf).map_err(|e| match e.kind() {
         io::ErrorKind::UnexpectedEof => format(format!("{what} lies past the image's end")),
@@ -176,7 +185,9 @@ pub fn entries(r: &mut (impl Read + Seek)) -> Result<Vec<Entry>, Error> {
                 i = (i / SECTOR as usize + 1) * SECTOR as usize;
                 continue;
             }
-            let rec = data.get(i..i + n).filter(|r| n >= 34 && 33 + r[32] as usize <= n);
+            let rec = data
+                .get(i..i + n)
+                .filter(|r| n >= 34 && 33 + r[32] as usize <= n);
             let Some(rec) = rec else {
                 return Err(format(format!("the directory /{prefix} is damaged")));
             };
@@ -197,7 +208,11 @@ pub fn entries(r: &mut (impl Read + Seek)) -> Result<Vec<Entry>, Error> {
             // FILE.EXT;1 is FILE.EXT; FILE.;1 (no extension) is FILE
             let name = name.split(';').next().unwrap_or_default();
             let name = name.strip_suffix('.').unwrap_or(name);
-            files.push(Entry { path: format!("{prefix}{name}"), sector: extent, size: length });
+            files.push(Entry {
+                path: format!("{prefix}{name}"),
+                sector: extent,
+                size: length,
+            });
         }
         todo.extend(found.into_iter().rev());
     }
@@ -245,7 +260,10 @@ fn usa_has(record: &[u8]) -> bool {
 /// are read in their order on the disc, so the image is read once from start to end.
 /// progress(done, total), in bytes of the files, is called first and after each piece; it stops the
 /// hashing (Error::Stopped) when it returns false.
-pub fn hash(r: &mut (impl Read + Seek), mut progress: impl FnMut(u64, u64) -> bool) -> Result<Files, Error> {
+pub fn hash(
+    r: &mut (impl Read + Seek),
+    mut progress: impl FnMut(u64, u64) -> bool,
+) -> Result<Files, Error> {
     let mut files = entries(r)?;
     files.sort_by_key(|f| f.sector);
     let total = files.iter().map(|f| f.size as u64).sum();
@@ -262,7 +280,9 @@ pub fn hash(r: &mut (impl Read + Seek), mut progress: impl FnMut(u64, u64) -> bo
         while left > 0 {
             let n = left.min(buf.len());
             r.read_exact(&mut buf[..n]).map_err(|e| match e.kind() {
-                io::ErrorKind::UnexpectedEof => format(format!("{} lies past the image's end", f.path)),
+                io::ErrorKind::UnexpectedEof => {
+                    format(format!("{} lies past the image's end", f.path))
+                }
                 _ => Error::Read(e),
             })?;
             contents.update(&buf[..n]);
@@ -281,8 +301,15 @@ pub fn hash(r: &mut (impl Read + Seek), mut progress: impl FnMut(u64, u64) -> bo
     }
     let mut sha256 = [0u8; 32];
     sha256.copy_from_slice(all.finish().as_ref());
-    let first_other = records.iter().find(|(record, _)| !usa_has(record)).map(|(_, path)| path.to_string());
-    Ok(Files { sha256, count: records.len(), first_other })
+    let first_other = records
+        .iter()
+        .find(|(record, _)| !usa_has(record))
+        .map(|(_, path)| path.to_string());
+    Ok(Files {
+        sha256,
+        count: records.len(),
+        first_other,
+    })
 }
 
 /// The game files hash of the image at path (`hash`).
@@ -312,13 +339,21 @@ pub fn cached(cache: &Path, path: &Path) -> Option<Files> {
     for (i, b) in sha256.iter_mut().enumerate() {
         *b = u8::from_str_radix(digest.get(2 * i..2 * i + 2)?, 16).ok()?;
     }
-    Some(Files { sha256, count, first_other })
+    Some(Files {
+        sha256,
+        count,
+        first_other,
+    })
 }
 
 /// The online check of the image at path: iso-check.txt's answer (at cache) when it holds this
 /// file's, else hashed now (progress as in `hash`) and written there, for the next start and for
 /// the launcher or the game, whichever comes next. The bool: from iso-check.txt.
-pub fn check(cache: Option<&Path>, path: &Path, progress: impl FnMut(u64, u64) -> bool) -> Result<(Files, bool), Error> {
+pub fn check(
+    cache: Option<&Path>,
+    path: &Path,
+    progress: impl FnMut(u64, u64) -> bool,
+) -> Result<(Files, bool), Error> {
     if let Some(files) = cache.and_then(|c| cached(c, path)) {
         return Ok((files, true));
     }
@@ -327,7 +362,10 @@ pub fn check(cache: Option<&Path>, path: &Path, progress: impl FnMut(u64, u64) -
     if let (Some(cache), Some(key)) = (cache, key) {
         // a cache that can't be written only costs the next start its hashing
         let first = files.first_other.as_deref().unwrap_or_default();
-        let _ = fs::write(cache, format!("{key}{}:{}:{first}\n", files.hex(), files.count));
+        let _ = fs::write(
+            cache,
+            format!("{key}{}:{}:{first}\n", files.hex(), files.count),
+        );
     }
     Ok((files, false))
 }
@@ -366,7 +404,10 @@ mod tests {
         for (path, data) in files {
             let at = (img.len() as u64 / SECTOR) as u32;
             img.extend_from_slice(data);
-            img.resize(img.len().div_ceil(SECTOR as usize) * SECTOR as usize + SECTOR as usize, 0);
+            img.resize(
+                img.len().div_ceil(SECTOR as usize) * SECTOR as usize + SECTOR as usize,
+                0,
+            );
             let (dir, name) = match path.split_once('/') {
                 Some((d, n)) => {
                     sub = Some(d.to_string());
@@ -374,7 +415,12 @@ mod tests {
                 }
                 None => (0, *path),
             };
-            dirs[dir].extend(entry(at, data.len() as u32, 0, format!("{name};1").as_bytes()));
+            dirs[dir].extend(entry(
+                at,
+                data.len() as u32,
+                0,
+                format!("{name};1").as_bytes(),
+            ));
         }
         if let Some(name) = sub {
             dirs[0].extend(entry(21, SECTOR as u32, 2, name.as_bytes()));
@@ -389,12 +435,20 @@ mod tests {
         hash(&mut Cursor::new(img), |_, _| true)
     }
 
-    const FILES: &[(&str, &[u8])] = &[("SYSTEM.CNF", b"BOOT2 = cdrom0:\\SCUS_971.77;1\r\n"), ("DATA/B.BIN", b"bee"), ("A.BIN", b"a")];
+    const FILES: &[(&str, &[u8])] = &[
+        ("SYSTEM.CNF", b"BOOT2 = cdrom0:\\SCUS_971.77;1\r\n"),
+        ("DATA/B.BIN", b"bee"),
+        ("A.BIN", b"a"),
+    ];
 
     #[test]
     fn hashes_paths_sizes_and_contents_in_path_order() {
         let img = image(FILES);
-        let mut paths: Vec<_> = entries(&mut Cursor::new(&img)).unwrap().into_iter().map(|e| e.path).collect();
+        let mut paths: Vec<_> = entries(&mut Cursor::new(&img))
+            .unwrap()
+            .into_iter()
+            .map(|e| e.path)
+            .collect();
         paths.sort();
         assert_eq!(paths, ["A.BIN", "DATA/B.BIN", "SYSTEM.CNF"]);
         // the definition, written out: each record, in path order
@@ -407,7 +461,10 @@ mod tests {
         assert_eq!(files.count, 3);
         assert_eq!(files.first_other.as_deref(), Some("A.BIN"));
         assert!(!files.is_usa());
-        assert_eq!(files.note(), "A.BIN isn't the USA disc's; 3 files, the USA disc has 2338");
+        assert_eq!(
+            files.note(),
+            "A.BIN isn't the USA disc's; 3 files, the USA disc has 2338"
+        );
     }
 
     #[test]
@@ -424,15 +481,28 @@ mod tests {
         longer.extend([0x55; 3 * SECTOR as usize]);
         assert_eq!(files_of(&longer).unwrap(), want);
         // the same files written in another order on the disc
-        assert_eq!(files_of(&image(&[FILES[2], FILES[0], FILES[1]])).unwrap(), want);
+        assert_eq!(
+            files_of(&image(&[FILES[2], FILES[0], FILES[1]])).unwrap(),
+            want
+        );
         // a byte of a file
         let mut other = img.clone();
         other[(24 + 2) * SECTOR as usize + 1] ^= 1; // DATA/B.BIN's second byte
         let files = files_of(&other).unwrap();
         assert_ne!(files.sha256, want.sha256);
         // a name or a size
-        assert_ne!(files_of(&image(&[FILES[0], ("DATA/C.BIN", b"bee"), FILES[2]])).unwrap().sha256, want.sha256);
-        assert_ne!(files_of(&image(&[FILES[0], ("DATA/B.BIN", b"bee\0"), FILES[2]])).unwrap().sha256, want.sha256);
+        assert_ne!(
+            files_of(&image(&[FILES[0], ("DATA/C.BIN", b"bee"), FILES[2]]))
+                .unwrap()
+                .sha256,
+            want.sha256
+        );
+        assert_ne!(
+            files_of(&image(&[FILES[0], ("DATA/B.BIN", b"bee\0"), FILES[2]]))
+                .unwrap()
+                .sha256,
+            want.sha256
+        );
         assert_ne!(files_of(&image(&FILES[..2])).unwrap().sha256, want.sha256);
     }
 
@@ -440,20 +510,32 @@ mod tests {
     fn names_what_it_cant_read() {
         let img = image(FILES);
         let no_volume = files_of(&img[..16 * SECTOR as usize]).unwrap_err();
-        assert!(matches!(&no_volume, Error::Format(w) if w.contains("no ISO 9660")), "{no_volume}");
+        assert!(
+            matches!(&no_volume, Error::Format(w) if w.contains("no ISO 9660")),
+            "{no_volume}"
+        );
         let mut other = img.clone();
         other[16 * SECTOR as usize + 1] = b'X';
         assert!(matches!(files_of(&other), Err(Error::Format(_))));
         // a cut dump: the last file's sector (28) is gone
         let cut = files_of(&img[..28 * SECTOR as usize]).unwrap_err();
-        assert!(matches!(&cut, Error::Format(w) if w == "A.BIN lies past the image's end"), "{cut}");
+        assert!(
+            matches!(&cut, Error::Format(w) if w == "A.BIN lies past the image's end"),
+            "{cut}"
+        );
         // a damaged directory record
         let mut other = img.clone();
         other[20 * SECTOR as usize + 34] = 20;
         assert!(matches!(files_of(&other), Err(Error::Format(w)) if w.contains("damaged")));
-        assert!(matches!(files_sha256(Path::new("no-such.iso"), |_, _| true), Err(Error::Read(_))));
+        assert!(matches!(
+            files_sha256(Path::new("no-such.iso"), |_, _| true),
+            Err(Error::Read(_))
+        ));
         // stopped when another disc is chosen
-        assert!(matches!(hash(&mut Cursor::new(&img), |done, _| done == 0), Err(Error::Stopped)));
+        assert!(matches!(
+            hash(&mut Cursor::new(&img), |done, _| done == 0),
+            Err(Error::Stopped)
+        ));
     }
 
     #[test]
@@ -490,19 +572,34 @@ mod tests {
         assert!(hashed && !from_cache);
         assert_eq!(files, want);
         let line = fs::read_to_string(&cache).unwrap();
-        assert_eq!(line, format!("{}{}:3:A.BIN\n", cache_key(&iso).unwrap(), want.hex()));
+        assert_eq!(
+            line,
+            format!("{}{}:3:A.BIN\n", cache_key(&iso).unwrap(), want.hex())
+        );
         assert!(line.starts_with("files:"));
         // the next time from the cache, without hashing
-        assert_eq!(check(Some(&cache), &iso, |_, _| panic!("hashed again")).unwrap(), (want.clone(), true));
+        assert_eq!(
+            check(Some(&cache), &iso, |_, _| panic!("hashed again")).unwrap(),
+            (want.clone(), true)
+        );
         // 0.6.x's line (size:ticks:whole file's SHA-256) is no answer, even for this file
         let meta = fs::metadata(&iso).unwrap();
-        fs::write(&cache, format!("{}:133000000000000000:{}\n", meta.len(), USA_FILES_SHA256)).unwrap();
+        fs::write(
+            &cache,
+            format!("{}:133000000000000000:{}\n", meta.len(), USA_FILES_SHA256),
+        )
+        .unwrap();
         assert_eq!(cached(&cache, &iso), None);
         // stale: the file changed (only its write time)
         fs::write(&cache, line).unwrap();
         assert!(cached(&cache, &iso).is_some());
         let later = meta.modified().unwrap() + std::time::Duration::from_secs(60);
-        File::options().write(true).open(&iso).unwrap().set_modified(later).unwrap();
+        File::options()
+            .write(true)
+            .open(&iso)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
         assert_eq!(cached(&cache, &iso), None);
         // without a cache: hashed every time
         assert_eq!(check(None, &iso, |_, _| true).unwrap(), (want, false));

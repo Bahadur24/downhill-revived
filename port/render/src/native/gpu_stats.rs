@@ -43,8 +43,19 @@ pub fn request(offered: wgpu::Features) -> wgpu::Features {
 
 /// A draw's kind (see the module): the shader path bits of `flags`, the texel scale, the variant,
 /// the pipeline's depth field, blending and whether it writes the alpha channel.
-pub fn class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool, alpha: bool) -> u32 {
-    (flags & 0xEFD) | (texel_scale & 15) << 12 | (variant & 3) << 16 | (depth & 31) << 18 | (blend as u32) << 23
+pub fn class(
+    flags: u32,
+    texel_scale: u32,
+    variant: u32,
+    depth: u32,
+    blend: bool,
+    alpha: bool,
+) -> u32 {
+    (flags & 0xEFD)
+        | (texel_scale & 15) << 12
+        | (variant & 3) << 16
+        | (depth & 31) << 18
+        | (blend as u32) << 23
         | (alpha as u32) << 24
 }
 
@@ -56,24 +67,48 @@ fn describe(c: u32) -> String {
         s += &format!("/tfx{}", f >> 2 & 3);
         s += if f & 32 != 0 { "/bilinear" } else { "/point" };
         let ts = c >> 12 & 15;
-        if ts != 0 { s += &format!("/scale{ts}"); } else { s += "/generic"; }
+        if ts != 0 {
+            s += &format!("/scale{ts}");
+        } else {
+            s += "/generic";
+        }
     } else {
         s += "flat";
     }
-    if f & 16 != 0 { s += "+fog"; }
-    if f & 64 != 0 { s += if f & 128 != 0 { "+atest-fail" } else { "+atest" }; }
-    if f & 512 != 0 { s += "+premul"; }
-    if f & 1024 != 0 { s += "+sprite"; }
+    if f & 16 != 0 {
+        s += "+fog";
+    }
+    if f & 64 != 0 {
+        s += if f & 128 != 0 {
+            "+atest-fail"
+        } else {
+            "+atest"
+        };
+    }
+    if f & 512 != 0 {
+        s += "+premul";
+    }
+    if f & 1024 != 0 {
+        s += "+sprite";
+    }
     s += ["", " dual", " rgb", " alpha-only"][(c >> 16 & 3) as usize];
     let d = c >> 18 & 31;
     if d & 16 != 0 {
-        s += &format!(" z:{}{}", ["never", "always", "gequal", "greater", "equal", "always", "always", "always"][(d & 7) as usize],
-                      if d & 8 != 0 { "+write" } else { "" });
+        s += &format!(
+            " z:{}{}",
+            ["never", "always", "gequal", "greater", "equal", "always", "always", "always"]
+                [(d & 7) as usize],
+            if d & 8 != 0 { "+write" } else { "" }
+        );
     } else {
         s += " z:none";
     }
-    if c >> 23 & 1 != 0 { s += " blend"; }
-    if c >> 24 & 1 != 0 { s += " writes-A"; }
+    if c >> 23 & 1 != 0 {
+        s += " blend";
+    }
+    if c >> 24 & 1 != 0 {
+        s += " writes-A";
+    }
     s
 }
 
@@ -85,7 +120,14 @@ struct Acc {
 }
 
 pub struct Stats {
-    queries: Option<(Option<wgpu::QuerySet>, wgpu::QuerySet, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, wgpu::Buffer)>,
+    queries: Option<(
+        Option<wgpu::QuerySet>,
+        wgpu::QuerySet,
+        wgpu::Buffer,
+        wgpu::Buffer,
+        wgpu::Buffer,
+        wgpu::Buffer,
+    )>,
     /// Pixel counts (pipeline statistics) are offered.
     pixels: bool,
     every: u64,
@@ -105,10 +147,26 @@ pub struct Stats {
 
 impl Stats {
     pub fn new() -> Stats {
-        Stats { queries: None, every: std::env::var("DHD_GPU_STATS").ok().and_then(|v| v.parse().ok()).filter(|&n| n > 0)
-                    .unwrap_or(60),
-                picture: 0, active: false, classes: Vec::new(), dropped: 0, passes: 0, switches: 0, keys: HashSet::new(),
-                distinct: 0, sampled: 0, acc: HashMap::new(), warned: false, pixels: false }
+        Stats {
+            queries: None,
+            every: std::env::var("DHD_GPU_STATS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(60),
+            picture: 0,
+            active: false,
+            classes: Vec::new(),
+            dropped: 0,
+            passes: 0,
+            switches: 0,
+            keys: HashSet::new(),
+            distinct: 0,
+            sampled: 0,
+            acc: HashMap::new(),
+            warned: false,
+            pixels: false,
+        }
     }
 
     /// At a picture's start: whether it is sampled.
@@ -129,20 +187,38 @@ impl Stats {
             return;
         }
         if self.queries.is_none() {
-            let buffer = |label, size, usage| gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some(label), size, usage, mapped_at_creation: false });
+            let buffer = |label, size, usage| {
+                gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size,
+                    usage,
+                    mapped_at_creation: false,
+                })
+            };
             let resolve = wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC;
             let read = wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST;
-            self.pixels = gpu.device.features().contains(wgpu::Features::PIPELINE_STATISTICS_QUERY);
+            self.pixels = gpu
+                .device
+                .features()
+                .contains(wgpu::Features::PIPELINE_STATISTICS_QUERY);
             if !self.pixels {
                 crate::host::log("gpu_stats: no pipeline statistics on this backend: times only (Vulkan has the pixel counts)");
             }
             self.queries = Some((
-                self.pixels.then(|| gpu.device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("gpu stats pixels"),
-                    ty: wgpu::QueryType::PipelineStatistics(wgpu::PipelineStatisticsTypes::FRAGMENT_SHADER_INVOCATIONS),
-                    count: DRAWS })),
-                gpu.device.create_query_set(&wgpu::QuerySetDescriptor { label: Some("gpu stats times"),
-                    ty: wgpu::QueryType::Timestamp, count: DRAWS * 2 }),
+                self.pixels.then(|| {
+                    gpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+                        label: Some("gpu stats pixels"),
+                        ty: wgpu::QueryType::PipelineStatistics(
+                            wgpu::PipelineStatisticsTypes::FRAGMENT_SHADER_INVOCATIONS,
+                        ),
+                        count: DRAWS,
+                    })
+                }),
+                gpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+                    label: Some("gpu stats times"),
+                    ty: wgpu::QueryType::Timestamp,
+                    count: DRAWS * 2,
+                }),
                 buffer("gpu stats pixels resolve", DRAWS as u64 * 8, resolve),
                 buffer("gpu stats times resolve", DRAWS as u64 * 16, resolve),
                 buffer("gpu stats pixels read", DRAWS as u64 * 8, read),
@@ -187,7 +263,9 @@ impl Stats {
     }
 
     pub fn draw_end(&mut self, pass: &mut wgpu::RenderPass<'static>, index: Option<u32>) {
-        let (Some(i), Some((stats, times, ..))) = (index, self.queries.as_ref()) else { return };
+        let (Some(i), Some((stats, times, ..))) = (index, self.queries.as_ref()) else {
+            return;
+        };
         if stats.is_some() {
             pass.end_pipeline_statistics_query();
         }
@@ -199,7 +277,9 @@ impl Stats {
         if !self.active || self.classes.is_empty() {
             return;
         }
-        let Some((stats, times, rs, rt, ps, pt)) = self.queries.as_ref() else { return };
+        let Some((stats, times, rs, rt, ps, pt)) = self.queries.as_ref() else {
+            return;
+        };
         let n = self.classes.len() as u32;
         if let Some(stats) = stats {
             encoder.resolve_query_set(stats, 0..n, rs, 0);
@@ -218,7 +298,9 @@ impl Stats {
         self.distinct += self.keys.len() as u64;
         let n = self.classes.len();
         if n > 0 {
-            let Some((_, _, _, _, ps, pt)) = self.queries.as_ref() else { return };
+            let Some((_, _, _, _, ps, pt)) = self.queries.as_ref() else {
+                return;
+            };
             let (a, b) = (ps.slice(..n as u64 * 8), pt.slice(..n as u64 * 16));
             let pixels_on = self.pixels;
             if pixels_on {
@@ -229,7 +311,9 @@ impl Stats {
             {
                 let pixels = pixels_on.then(|| a.get_mapped_range());
                 let times = b.get_mapped_range();
-                let word = |d: &[u8], q: usize| u64::from_le_bytes(d[q * 8..q * 8 + 8].try_into().expect("8 bytes"));
+                let word = |d: &[u8], q: usize| {
+                    u64::from_le_bytes(d[q * 8..q * 8 + 8].try_into().expect("8 bytes"))
+                };
                 let period = gpu.queue.get_timestamp_period() as f64;
                 for (i, &c) in self.classes.iter().enumerate() {
                     let e = self.acc.entry(c).or_default();
@@ -253,17 +337,30 @@ impl Stats {
         let f = self.sampled as f64;
         let mut rows: Vec<(u32, Acc)> = self.acc.drain().collect();
         rows.sort_by(|a, b| b.1.ns.total_cmp(&a.1.ns));
-        let total = rows.iter().fold(Acc::default(), |t, (_, a)| Acc { draws: t.draws + a.draws, pixels: t.pixels + a.pixels,
-                                                                       ns: t.ns + a.ns });
+        let total = rows.iter().fold(Acc::default(), |t, (_, a)| Acc {
+            draws: t.draws + a.draws,
+            pixels: t.pixels + a.pixels,
+            ns: t.ns + a.ns,
+        });
         crate::host::log(&format!(
             "gpu_stats: pictures={} draws={:.0} mpix_shaded={:.3} draw_ms={:.3} passes={:.1} pipeline_sets={:.1} pipelines={:.1} dropped={}",
             self.sampled, total.draws as f64 / f, total.pixels as f64 / f / 1e6, total.ns / f / 1e6, self.passes as f64 / f,
             self.switches as f64 / f, self.distinct as f64 / f, self.dropped));
         for (c, a) in rows {
-            crate::host::log(&format!("gpu_stats:   {:6.2}% ms={:.3} mpix={:.3} draws={:.1} ns/pix={:.2} class={:07X} {}",
-                                      100.0 * a.ns / total.ns.max(1.0), a.ns / f / 1e6, a.pixels as f64 / f / 1e6,
-                                      a.draws as f64 / f, if a.pixels > 0 { a.ns / a.pixels as f64 } else { 0.0 }, c,
-                                      describe(c)));
+            crate::host::log(&format!(
+                "gpu_stats:   {:6.2}% ms={:.3} mpix={:.3} draws={:.1} ns/pix={:.2} class={:07X} {}",
+                100.0 * a.ns / total.ns.max(1.0),
+                a.ns / f / 1e6,
+                a.pixels as f64 / f / 1e6,
+                a.draws as f64 / f,
+                if a.pixels > 0 {
+                    a.ns / a.pixels as f64
+                } else {
+                    0.0
+                },
+                c,
+                describe(c)
+            ));
         }
         self.sampled = 0;
         self.passes = 0;

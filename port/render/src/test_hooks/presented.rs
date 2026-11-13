@@ -17,13 +17,21 @@ struct Presented {
     height: u32,
 }
 
-static LAST: Mutex<Presented> = Mutex::new(Presented { pixels: Vec::new(), width: 0, height: 0 });
+static LAST: Mutex<Presented> = Mutex::new(Presented {
+    pixels: Vec::new(),
+    width: 0,
+    height: 0,
+});
 
 /// Reads `frame` back (blocking) and keeps it as the last presented picture.
 pub fn capture(gpu: &Gpu, frame: &wgpu::Texture) {
     let (width, height) = (frame.width(), frame.height());
     let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
-    *last = Presented { pixels: Vec::new(), width: 0, height: 0 };
+    *last = Presented {
+        pixels: Vec::new(),
+        width: 0,
+        height: 0,
+    };
     if width == 0 || height == 0 {
         return;
     }
@@ -36,7 +44,9 @@ pub fn capture(gpu: &Gpu, frame: &wgpu::Texture) {
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: frame,
@@ -46,9 +56,17 @@ pub fn capture(gpu: &Gpu, frame: &wgpu::Texture) {
         },
         wgpu::TexelCopyBufferInfo {
             buffer: &read,
-            layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride as u32), rows_per_image: Some(height) },
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(stride as u32),
+                rows_per_image: Some(height),
+            },
         },
-        wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
     );
     gpu.queue.submit([encoder.finish()]);
     let bytes = match super::depth_probe::map_read(gpu, &read, size) {
@@ -61,9 +79,16 @@ pub fn capture(gpu: &Gpu, frame: &wgpu::Texture) {
     let mut pixels = Vec::with_capacity(width as usize * height as usize);
     for y in 0..height as usize {
         let line = &bytes[y * stride as usize..y * stride as usize + row as usize];
-        pixels.extend(line.chunks_exact(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])));
+        pixels.extend(
+            line.chunks_exact(4)
+                .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+        );
     }
-    *last = Presented { pixels, width, height };
+    *last = Presented {
+        pixels,
+        width,
+        height,
+    };
 }
 
 /// The last presented picture: (pixels, width, height); NULL, 0, 0 when there is none. The

@@ -37,8 +37,10 @@
 //! take no copies in), `Native::surface_read` (blocking natively), `Native::surface_drop`.
 //!
 //! Referee: native_replay on the no-draw pictures (N4).
-use crate::abi::{DhdrCommand, DhdrNativeConstants, DhdrPictureResult, DHDR_CMD_ALPHA_UPLOAD, DHDR_CMD_COPY,
-                 DHDR_CMD_IMPORT, DHDR_NATIVE_SURFACES};
+use crate::abi::{
+    DhdrCommand, DhdrNativeConstants, DhdrPictureResult, DHDR_CMD_ALPHA_UPLOAD, DHDR_CMD_COPY,
+    DHDR_CMD_IMPORT, DHDR_NATIVE_SURFACES,
+};
 use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::init::Objects;
@@ -149,8 +151,13 @@ pub struct Kit<'a> {
 impl<'a> Kit<'a> {
     /// The kit from the native objects (init.rs), the shared ones (shared.rs), the arenas and the
     /// picture's encoder.
-    pub fn new(gpu: &'a Gpu, objects: &'a Objects, shared: &'a NativeShared, arenas: &'a mut Arenas,
-               encoder: &'a mut wgpu::CommandEncoder) -> Kit<'a> {
+    pub fn new(
+        gpu: &'a Gpu,
+        objects: &'a Objects,
+        shared: &'a NativeShared,
+        arenas: &'a mut Arenas,
+        encoder: &'a mut wgpu::CommandEncoder,
+    ) -> Kit<'a> {
         Kit {
             gpu,
             encoder,
@@ -179,7 +186,11 @@ fn surface_index(i: i16) -> Option<usize> {
 }
 
 fn extent(w: u32, h: u32) -> wgpu::Extent3d {
-    wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 }
+    wgpu::Extent3d {
+        width: w,
+        height: h,
+        depth_or_array_layers: 1,
+    }
 }
 
 /// native_at
@@ -193,18 +204,42 @@ fn at(texture: &wgpu::Texture, x: u32, y: u32) -> wgpu::TexelCopyTextureInfo<'_>
 }
 
 fn view_entry(binding: u32, view: &wgpu::TextureView) -> wgpu::BindGroupEntry<'_> {
-    wgpu::BindGroupEntry { binding, resource: wgpu::BindingResource::TextureView(view) }
+    wgpu::BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::TextureView(view),
+    }
 }
 
-fn group(gpu: &Gpu, layout: &wgpu::BindGroupLayout, entries: &[wgpu::BindGroupEntry]) -> wgpu::BindGroup {
-    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor { label: None, layout, entries })
+fn group(
+    gpu: &Gpu,
+    layout: &wgpu::BindGroupLayout,
+    entries: &[wgpu::BindGroupEntry],
+) -> wgpu::BindGroup {
+    gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: None,
+        layout,
+        entries,
+    })
 }
 
 /// native_texture_group: a sampled texture's draw bind group (the nearest sampler).
-fn texture_group(gpu: &Gpu, layout: &wgpu::BindGroupLayout, nearest: &wgpu::Sampler, view: &wgpu::TextureView)
-                 -> wgpu::BindGroup {
-    group(gpu, layout, &[view_entry(0, view),
-                         wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(nearest) }])
+fn texture_group(
+    gpu: &Gpu,
+    layout: &wgpu::BindGroupLayout,
+    nearest: &wgpu::Sampler,
+    view: &wgpu::TextureView,
+) -> wgpu::BindGroup {
+    group(
+        gpu,
+        layout,
+        &[
+            view_entry(0, view),
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(nearest),
+            },
+        ],
+    )
 }
 
 /// Runs `f` inside OutOfMemory and Validation error scopes: Err (naming `what`) when it raised an
@@ -232,11 +267,19 @@ fn scoped<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<R, String> 
 }
 
 /// native_new_texture, and its whole view.
-fn new_texture(gpu: &Gpu, w: u32, h: u32, format: wgpu::TextureFormat, usage: wgpu::TextureUsages, label: &str)
-               -> Result<(wgpu::Texture, wgpu::TextureView), String> {
+fn new_texture(
+    gpu: &Gpu,
+    w: u32,
+    h: u32,
+    format: wgpu::TextureFormat,
+    usage: wgpu::TextureUsages,
+    label: &str,
+) -> Result<(wgpu::Texture, wgpu::TextureView), String> {
     let max = gpu.device.limits().max_texture_dimension_2d;
     if w == 0 || h == 0 || w > max || h > max {
-        return Err(format!("gs native: {label} of {w} x {h} (the device allows 1 to {max} a side)"));
+        return Err(format!(
+            "gs native: {label} of {w} x {h} (the device allows 1 to {max} a side)"
+        ));
     }
     scoped(gpu, label, || {
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -256,8 +299,19 @@ fn new_texture(gpu: &Gpu, w: u32, h: u32, format: wgpu::TextureFormat, usage: wg
 
 /// native_copy_box: a box (texture pixels) between textures, cut to both.
 #[allow(clippy::too_many_arguments)]
-fn copy_box(encoder: &mut wgpu::CommandEncoder, from: &wgpu::Texture, from_size: [u32; 2], sx: u32, sy: u32,
-            to: &wgpu::Texture, to_size: [u32; 2], x: u32, y: u32, mut w: u32, mut h: u32) {
+fn copy_box(
+    encoder: &mut wgpu::CommandEncoder,
+    from: &wgpu::Texture,
+    from_size: [u32; 2],
+    sx: u32,
+    sy: u32,
+    to: &wgpu::Texture,
+    to_size: [u32; 2],
+    x: u32,
+    y: u32,
+    mut w: u32,
+    mut h: u32,
+) {
     if sx >= from_size[0] || sy >= from_size[1] || x >= to_size[0] || y >= to_size[1] {
         return;
     }
@@ -273,8 +327,18 @@ fn copy_box(encoder: &mut wgpu::CommandEncoder, from: &wgpu::Texture, from_size:
 /// rectangle (x, y, w, h) in its pixels, with this pipeline, the 16 bytes `map` as its constants
 /// and `bind` as group 1.
 #[allow(clippy::too_many_arguments)]
-fn rect_pass(kit: &mut Kit, view: &wgpu::TextureView, size: [u32; 2], pipe: &wgpu::RenderPipeline, map: [f32; 4],
-             bind: &wgpu::BindGroup, x: u32, y: u32, mut w: u32, mut h: u32) {
+fn rect_pass(
+    kit: &mut Kit,
+    view: &wgpu::TextureView,
+    size: [u32; 2],
+    pipe: &wgpu::RenderPipeline,
+    map: [f32; 4],
+    bind: &wgpu::BindGroup,
+    x: u32,
+    y: u32,
+    mut w: u32,
+    mut h: u32,
+) {
     if x >= size[0] || y >= size[1] {
         return;
     }
@@ -300,7 +364,10 @@ fn rect_pass(kit: &mut Kit, view: &wgpu::TextureView, size: [u32; 2], pipe: &wgp
             view,
             depth_slice: None,
             resolve_target: None,
-            ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
         })],
         depth_stencil_attachment: None,
         timestamp_writes: times.as_ref().map(gputimes::Slot::render),
@@ -318,10 +385,22 @@ fn rect_pass(kit: &mut Kit, view: &wgpu::TextureView, size: [u32; 2], pipe: &wgp
 /// native_blit: a w x h rectangle (GS pixels) of a texture at scale `from`, at (sx, sy), into
 /// surface t at (x, y), when the scales differ (native.wgsl native_blit).
 #[allow(clippy::too_many_arguments)]
-fn blit(kit: &mut Kit, source: &wgpu::TextureView, from: u32, sx: i32, sy: i32, t: &Surface, x: i32, y: i32,
-        mut w: i32, mut h: i32) {
+fn blit(
+    kit: &mut Kit,
+    source: &wgpu::TextureView,
+    from: u32,
+    sx: i32,
+    sy: i32,
+    t: &Surface,
+    x: i32,
+    y: i32,
+    mut w: i32,
+    mut h: i32,
+) {
     let tt = t.scale;
-    let Some(view) = t.view.as_ref().filter(|_| tt != 0) else { return };
+    let Some(view) = t.view.as_ref().filter(|_| tt != 0) else {
+        return;
+    };
     // C: int arithmetic on the GS pixel rectangle against the texture's size / scale.
     let (tw, th) = ((t.size[0] / tt) as i32, (t.size[1] / tt) as i32);
     if x.wrapping_add(w) > tw {
@@ -333,19 +412,42 @@ fn blit(kit: &mut Kit, source: &wgpu::TextureView, from: u32, sx: i32, sy: i32, 
     if w <= 0 || h <= 0 || x < 0 || y < 0 {
         return;
     }
-    let map = [sx.wrapping_sub(x) as f32, sy.wrapping_sub(y) as f32, tt as f32, from as f32];
+    let map = [
+        sx.wrapping_sub(x) as f32,
+        sy.wrapping_sub(y) as f32,
+        tt as f32,
+        from as f32,
+    ];
     let (gpu, layout, pipe, dummy) = (kit.gpu, kit.blit_layout, kit.blit_pipe, kit.dummy_view);
     let bind = group(gpu, layout, &[view_entry(0, source), view_entry(1, dummy)]);
-    rect_pass(kit, view, t.size, pipe, map, &bind, (x as u32).wrapping_mul(tt), (y as u32).wrapping_mul(tt),
-              (w as u32).wrapping_mul(tt), (h as u32).wrapping_mul(tt));
+    rect_pass(
+        kit,
+        view,
+        t.size,
+        pipe,
+        map,
+        &bind,
+        (x as u32).wrapping_mul(tt),
+        (y as u32).wrapping_mul(tt),
+        (w as u32).wrapping_mul(tt),
+        (h as u32).wrapping_mul(tt),
+    );
 }
 
 /// native_grow_depth: a Z surface's old contents (`from`, `size`) drawn into its new, larger
 /// texture `to` (cleared to 0 first).
-fn grow_depth(kit: &mut Kit, from: &wgpu::TextureView, size: [u32; 2], to: &wgpu::TextureView) -> Result<(), String> {
+fn grow_depth(
+    kit: &mut Kit,
+    from: &wgpu::TextureView,
+    size: [u32; 2],
+    to: &wgpu::TextureView,
+) -> Result<(), String> {
     let (gpu, layout, pipe) = (kit.gpu, kit.grow_layout, kit.grow_pipe);
     let bind = group(gpu, layout, &[view_entry(0, from)]);
-    let uniforms = kit.arenas.uniform_group().ok_or("gs native: a Z surface grown before the arenas were reserved")?;
+    let uniforms = kit
+        .arenas
+        .uniform_group()
+        .ok_or("gs native: a Z surface grown before the arenas were reserved")?;
     crate::native::render::pass_trace::event("surface-rect:load/store", -1, -1);
     let times = gputimes::slot(gpu, gputimes::SURFACE);
     let mut pass = kit.encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -353,7 +455,10 @@ fn grow_depth(kit: &mut Kit, from: &wgpu::TextureView, size: [u32; 2], to: &wgpu
         color_attachments: &[],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: to,
-            depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(0.0),
+                store: wgpu::StoreOp::Store,
+            }),
             stencil_ops: None,
         }),
         timestamp_writes: times.as_ref().map(gputimes::Slot::render),
@@ -370,10 +475,19 @@ fn grow_depth(kit: &mut Kit, from: &wgpu::TextureView, size: [u32; 2], to: &wgpu
 }
 
 /// The upload of `pixels` (w x h, from `upload`'s offset and stride) as a buffer copy source.
-fn upload_source(buffer: &wgpu::Buffer, offset: u64, stride: u32, h: u32) -> wgpu::TexelCopyBufferInfo<'_> {
+fn upload_source(
+    buffer: &wgpu::Buffer,
+    offset: u64,
+    stride: u32,
+    h: u32,
+) -> wgpu::TexelCopyBufferInfo<'_> {
     wgpu::TexelCopyBufferInfo {
         buffer,
-        layout: wgpu::TexelCopyBufferLayout { offset, bytes_per_row: Some(stride), rows_per_image: Some(h) },
+        layout: wgpu::TexelCopyBufferLayout {
+            offset,
+            bytes_per_row: Some(stride),
+            rows_per_image: Some(h),
+        },
     }
 }
 
@@ -398,10 +512,19 @@ impl Surfaces {
     /// scaled pixels (a Z surface when `depth`), keeping what it holds; the texture's size. Err
     /// (nothing made) keeps the old texture. A surface that changes between colour and Z starts
     /// again, empty (C never asks for that).
-    pub fn resources(&mut self, gpu: &Gpu, index: usize, scale: u32, w: u32, h: u32, depth: bool)
-                     -> Result<[u32; 2], String> {
+    pub fn resources(
+        &mut self,
+        gpu: &Gpu,
+        index: usize,
+        scale: u32,
+        w: u32,
+        h: u32,
+        depth: bool,
+    ) -> Result<[u32; 2], String> {
         if index >= SURFACES {
-            return Err(format!("gs native: surface {index} (fewer than {SURFACES})"));
+            return Err(format!(
+                "gs native: surface {index} (fewer than {SURFACES})"
+            ));
         }
         if scale == 0 {
             return Err(format!("gs native: surface {index} at scale 0"));
@@ -417,15 +540,34 @@ impl Surfaces {
         if s.texture.is_some() && s.size[0] >= w && s.size[1] >= h {
             return Ok(s.size);
         }
-        let (w, h) = if s.texture.is_some() { (w.max(s.size[0]), h.max(s.size[1])) } else { (w, h) };
-        let (texture, view) = if depth {
-            new_texture(gpu, w, h, wgpu::TextureFormat::Depth32Float,
-                        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_SRC, "native z")?
+        let (w, h) = if s.texture.is_some() {
+            (w.max(s.size[0]), h.max(s.size[1]))
         } else {
-            new_texture(gpu, w, h, wgpu::TextureFormat::Rgba8Unorm,
-                        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
-                            | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST, "native surface")?
+            (w, h)
+        };
+        let (texture, view) = if depth {
+            new_texture(
+                gpu,
+                w,
+                h,
+                wgpu::TextureFormat::Depth32Float,
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+                "native z",
+            )?
+        } else {
+            new_texture(
+                gpu,
+                w,
+                h,
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST,
+                "native surface",
+            )?
         };
         let old_size = s.size;
         let old = s.texture.replace(texture).zip(s.view.replace(view));
@@ -435,7 +577,13 @@ impl Surfaces {
             // Grown twice before a picture: the texture made the first time holds nothing yet, so
             // the first one's old contents still go into the newest.
             if !self.grows.iter().any(|g| g.index == index) {
-                self.grows.push(Grow { index, texture, view, size: old_size, depth });
+                self.grows.push(Grow {
+                    index,
+                    texture,
+                    view,
+                    size: old_size,
+                    depth,
+                });
             }
         }
         Ok([w, h])
@@ -452,11 +600,17 @@ impl Surfaces {
         }
         for g in std::mem::take(&mut self.grows) {
             let s = &self.list[g.index];
-            let (Some(texture), Some(view)) = (&s.texture, &s.view) else { continue };
+            let (Some(texture), Some(view)) = (&s.texture, &s.view) else {
+                continue;
+            };
             if g.depth {
                 grow_depth(kit, &g.view, g.size, view)?;
             } else {
-                kit.encoder.copy_texture_to_texture(at(&g.texture, 0, 0), at(texture, 0, 0), extent(g.size[0], g.size[1]));
+                kit.encoder.copy_texture_to_texture(
+                    at(&g.texture, 0, 0),
+                    at(texture, 0, 0),
+                    extent(g.size[0], g.size[1]),
+                );
             }
         }
         Ok(())
@@ -464,8 +618,13 @@ impl Surfaces {
 
     /// native_surface_group: a colour surface's draw bind group (made when first sampled); None
     /// for a Z surface or one without a texture.
-    pub fn group(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout, nearest: &wgpu::Sampler, index: usize)
-                 -> Option<&wgpu::BindGroup> {
+    pub fn group(
+        &mut self,
+        gpu: &Gpu,
+        layout: &wgpu::BindGroupLayout,
+        nearest: &wgpu::Sampler,
+        index: usize,
+    ) -> Option<&wgpu::BindGroup> {
         let s = self.list.get_mut(index)?;
         if s.group.is_none() && !s.depth {
             let view = s.view.as_ref()?;
@@ -482,13 +641,24 @@ impl Surfaces {
         }
         self.scratch = None;
         let (w, h) = (w.max(self.scratch_size[0]), h.max(self.scratch_size[1]));
-        let made = new_texture(kit.gpu, w, h, wgpu::TextureFormat::Rgba8Unorm,
-                               wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST
-                                   | wgpu::TextureUsages::COPY_SRC, "native scratch");
+        let made = new_texture(
+            kit.gpu,
+            w,
+            h,
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            "native scratch",
+        );
         match made {
             Ok((texture, view)) => {
                 let group = texture_group(kit.gpu, kit.texture_layout, kit.nearest, &view);
-                self.scratch = Some(Scratch { texture, view, group });
+                self.scratch = Some(Scratch {
+                    texture,
+                    view,
+                    group,
+                });
                 self.scratch_size = [w, h];
                 true
             }
@@ -503,8 +673,14 @@ impl Surfaces {
     /// The import texture, made on first use; false when it could not be.
     fn import_texture(&mut self, gpu: &Gpu) -> bool {
         if self.import.is_none() {
-            match new_texture(gpu, IMPORT_SIDE, IMPORT_SIDE, wgpu::TextureFormat::Rgba8Unorm,
-                              wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, "native import") {
+            match new_texture(
+                gpu,
+                IMPORT_SIDE,
+                IMPORT_SIDE,
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                "native import",
+            ) {
                 Ok(t) => self.import = Some(t),
                 Err(e) => crate::host::log(&e),
             }
@@ -514,8 +690,13 @@ impl Surfaces {
 
     /// A COPY, IMPORT or ALPHA_UPLOAD command (`pixels`: `Picture::pixels` of it); the counts go
     /// to `out`. False for any other kind (nothing done).
-    pub fn transfer(&mut self, kit: &mut Kit, k: &DhdrCommand, pixels: Option<&[u32]>, out: &mut DhdrPictureResult)
-                    -> bool {
+    pub fn transfer(
+        &mut self,
+        kit: &mut Kit,
+        k: &DhdrCommand,
+        pixels: Option<&[u32]>,
+        out: &mut DhdrPictureResult,
+    ) -> bool {
         match k.kind {
             DHDR_CMD_ALPHA_UPLOAD => self.alpha_upload(kit, k, pixels),
             DHDR_CMD_IMPORT => self.import(kit, k, pixels, out),
@@ -529,7 +710,9 @@ impl Surfaces {
     /// `source` at (sx, sy) to surface `target` at (x, y); through the scratch texture onto
     /// itself, or blitted when the scales differ.
     fn copy(&mut self, kit: &mut Kit, k: &DhdrCommand, out: &mut DhdrPictureResult) {
-        let (Some(si), Some(ti)) = (surface_index(k.source), surface_index(k.target)) else { return };
+        let (Some(si), Some(ti)) = (surface_index(k.source), surface_index(k.target)) else {
+            return;
+        };
         let (s, t) = (&self.list[si], &self.list[ti]);
         if s.texture.is_none() || t.texture.is_none() || s.depth || t.depth {
             return;
@@ -574,20 +757,67 @@ impl Surfaces {
             }
             let (s, scratch) = (&self.list[si], self.scratch.as_ref().expect("scratch made"));
             let texture = s.texture.as_ref().expect("checked above");
-            copy_box(kit.encoder, texture, s.size, bx, by, &scratch.texture, self.scratch_size, bx, by, bw, bh);
-            copy_box(kit.encoder, &scratch.texture, self.scratch_size, bx, by, texture, s.size, dx, dy, bw, bh);
+            copy_box(
+                kit.encoder,
+                texture,
+                s.size,
+                bx,
+                by,
+                &scratch.texture,
+                self.scratch_size,
+                bx,
+                by,
+                bw,
+                bh,
+            );
+            copy_box(
+                kit.encoder,
+                &scratch.texture,
+                self.scratch_size,
+                bx,
+                by,
+                texture,
+                s.size,
+                dx,
+                dy,
+                bw,
+                bh,
+            );
         } else {
             let (s, t) = (&self.list[si], &self.list[ti]);
-            let (from, to) = (s.texture.as_ref().expect("checked above"), t.texture.as_ref().expect("checked above"));
-            copy_box(kit.encoder, from, s.size, bx, by, to, t.size, dx, dy, bw, bh);
+            let (from, to) = (
+                s.texture.as_ref().expect("checked above"),
+                t.texture.as_ref().expect("checked above"),
+            );
+            copy_box(
+                kit.encoder,
+                from,
+                s.size,
+                bx,
+                by,
+                to,
+                t.size,
+                dx,
+                dy,
+                bw,
+                bh,
+            );
         }
     }
 
     /// The IMPORT case of native_render: w x h CPU pixels into surface `target` at (x, y); at 1x
     /// a copy cut to the texture, upscaled (pages of at most 64 x 64) through the import texture
     /// and a blit, a block per pixel.
-    fn import(&mut self, kit: &mut Kit, k: &DhdrCommand, pixels: Option<&[u32]>, out: &mut DhdrPictureResult) {
-        let Some(ti) = surface_index(k.target) else { return };
+    fn import(
+        &mut self,
+        kit: &mut Kit,
+        k: &DhdrCommand,
+        pixels: Option<&[u32]>,
+        out: &mut DhdrPictureResult,
+    ) {
+        let Some(ti) = surface_index(k.target) else {
+            return;
+        };
         {
             let s = &self.list[ti];
             if s.texture.is_none() || s.depth {
@@ -605,8 +835,11 @@ impl Surfaces {
                 if let Some(p) = pixels {
                     let (offset, stride) = kit.arenas.upload(p, k.w as u32, k.h as u32);
                     if let Some(buffer) = kit.arenas.upload_buffer() {
-                        kit.encoder.copy_buffer_to_texture(upload_source(buffer, offset, stride, k.h as u32),
-                                                           at(texture, x, y), extent(w, h));
+                        kit.encoder.copy_buffer_to_texture(
+                            upload_source(buffer, offset, stride, k.h as u32),
+                            at(texture, x, y),
+                            extent(w, h),
+                        );
                     }
                 }
             }
@@ -616,22 +849,40 @@ impl Surfaces {
                 let (w, h) = (k.w as u32, k.h as u32);
                 let (offset, stride) = kit.arenas.upload(p, w, h);
                 if let Some(buffer) = kit.arenas.upload_buffer() {
-                    kit.encoder.copy_buffer_to_texture(upload_source(buffer, offset, stride, h), at(import, 0, 0),
-                                                       extent(w, h));
+                    kit.encoder.copy_buffer_to_texture(
+                        upload_source(buffer, offset, stride, h),
+                        at(import, 0, 0),
+                        extent(w, h),
+                    );
                 }
-                blit(kit, import_view, 1, 0, 0, &self.list[ti], k.x, k.y, k.w, k.h);
+                blit(
+                    kit,
+                    import_view,
+                    1,
+                    0,
+                    0,
+                    &self.list[ti],
+                    k.x,
+                    k.y,
+                    k.w,
+                    k.h,
+                );
             }
         }
         out.imports += 1;
         // C: (uint64_t)k->w * k->h
-        out.import_px = out.import_px.wrapping_add((k.w as i64 as u64).wrapping_mul(k.h as i64 as u64));
+        out.import_px = out
+            .import_px
+            .wrapping_add((k.w as i64 as u64).wrapping_mul(k.h as i64 as u64));
     }
 
     /// native_alpha_upload: a page (64 x 32 GS pixels at (x, y)) of masked alpha bits applied to
     /// surface `target` without resampling its scaled RGB: the region goes to the scratch texture,
     /// the page to the import texture, and native_upload_alpha draws both back.
     fn alpha_upload(&mut self, kit: &mut Kit, k: &DhdrCommand, pixels: Option<&[u32]>) {
-        let Some(ti) = surface_index(k.target) else { return };
+        let Some(ti) = surface_index(k.target) else {
+            return;
+        };
         let ss = self.list[ti].scale;
         let left = (k.x as u32).wrapping_mul(ss);
         let top = (k.y as u32).wrapping_mul(ss);
@@ -651,27 +902,65 @@ impl Surfaces {
             return;
         }
         let s = &self.list[ti];
-        let (texture, view) = (s.texture.as_ref().expect("checked above"), s.view.as_ref().expect("made with it"));
+        let (texture, view) = (
+            s.texture.as_ref().expect("checked above"),
+            s.view.as_ref().expect("made with it"),
+        );
         let scratch = self.scratch.as_ref().expect("scratch made");
-        copy_box(kit.encoder, texture, s.size, left, top, &scratch.texture, self.scratch_size, left, top,
-                 right.wrapping_sub(left), bottom.wrapping_sub(top));
+        copy_box(
+            kit.encoder,
+            texture,
+            s.size,
+            left,
+            top,
+            &scratch.texture,
+            self.scratch_size,
+            left,
+            top,
+            right.wrapping_sub(left),
+            bottom.wrapping_sub(top),
+        );
         let (import, import_view) = self.import.as_ref().expect("made above");
         let (offset, stride) = kit.arenas.upload(p, 64, 32);
         if let Some(buffer) = kit.arenas.upload_buffer() {
-            kit.encoder.copy_buffer_to_texture(upload_source(buffer, offset, stride, 32), at(import, 0, 0), extent(64, 32));
+            kit.encoder.copy_buffer_to_texture(
+                upload_source(buffer, offset, stride, 32),
+                at(import, 0, 0),
+                extent(64, 32),
+            );
         }
         let map = [k.x as f32, k.y as f32, ss as f32, 0.0];
         let (gpu, layout, pipe) = (kit.gpu, kit.blit_layout, kit.upload_pipe);
-        let bind = group(gpu, layout, &[view_entry(0, import_view), view_entry(1, &scratch.view)]);
-        rect_pass(kit, view, s.size, pipe, map, &bind, left, top, 64u32.wrapping_mul(ss), 32u32.wrapping_mul(ss));
+        let bind = group(
+            gpu,
+            layout,
+            &[view_entry(0, import_view), view_entry(1, &scratch.view)],
+        );
+        rect_pass(
+            kit,
+            view,
+            s.size,
+            pipe,
+            map,
+            &bind,
+            left,
+            top,
+            64u32.wrapping_mul(ss),
+            32u32.wrapping_mul(ss),
+        );
     }
 
     /// A draw sampling its own target (surface `index`, the command's constants `c`): the region
     /// its texture can reach (tex_offset, tex_size, cut to the surface) copied to the scratch
     /// texture, which it then draws from; that bind group, or None to skip the draw (C's
     /// `continue`). Counts a self-copy.
-    pub fn sample_target(&mut self, kit: &mut Kit, index: usize, c: &DhdrNativeConstants, out: &mut DhdrPictureResult)
-                         -> Option<&wgpu::BindGroup> {
+    pub fn sample_target(
+        &mut self,
+        kit: &mut Kit,
+        index: usize,
+        c: &DhdrNativeConstants,
+        out: &mut DhdrPictureResult,
+    ) -> Option<&wgpu::BindGroup> {
         let s = self.list.get(index)?;
         let ss = s.scale;
         if ss == 0 {
@@ -691,7 +980,11 @@ impl Surfaces {
         if x < 0 || y < 0 {
             return None;
         }
-        if !self.scratch(kit, (x.wrapping_add(w) as u32).wrapping_mul(ss), (y.wrapping_add(h) as u32).wrapping_mul(ss)) {
+        if !self.scratch(
+            kit,
+            (x.wrapping_add(w) as u32).wrapping_mul(ss),
+            (y.wrapping_add(h) as u32).wrapping_mul(ss),
+        ) {
             return None;
         }
         let s = &self.list[index];
@@ -699,8 +992,19 @@ impl Surfaces {
         if w != 0 && h != 0 {
             if let Some(texture) = &s.texture {
                 let (bx, by) = ((x as u32).wrapping_mul(ss), (y as u32).wrapping_mul(ss));
-                copy_box(kit.encoder, texture, s.size, bx, by, &scratch.texture, self.scratch_size, bx, by,
-                         (w as u32).wrapping_mul(ss), (h as u32).wrapping_mul(ss));
+                copy_box(
+                    kit.encoder,
+                    texture,
+                    s.size,
+                    bx,
+                    by,
+                    &scratch.texture,
+                    self.scratch_size,
+                    bx,
+                    by,
+                    (w as u32).wrapping_mul(ss),
+                    (h as u32).wrapping_mul(ss),
+                );
             }
         }
         out.self_copies += 1;
@@ -720,35 +1024,59 @@ impl Surfaces {
     /// surface depth32float bit patterns), replacing any pending growth. Replays (NTRACE.md's
     /// `before` blobs).
     pub fn fill(&mut self, gpu: &Gpu, index: usize, bytes: &[u8]) -> Result<(), String> {
-        let s = self.list.get(index).ok_or_else(|| format!("gs native: surface {index} (fewer than {SURFACES})"))?;
+        let s = self
+            .list
+            .get(index)
+            .ok_or_else(|| format!("gs native: surface {index} (fewer than {SURFACES})"))?;
         let (Some(texture), Some(view)) = (&s.texture, &s.view) else {
             return Err(format!("gs native: surface {index} has no texture to fill"));
         };
         let [w, h] = s.size;
         if bytes.len() as u64 != w as u64 * h as u64 * 4 {
-            return Err(format!("gs native: surface {index} is {w} x {h}, the fill {} bytes", bytes.len()));
+            return Err(format!(
+                "gs native: surface {index} is {w} x {h}, the fill {} bytes",
+                bytes.len()
+            ));
         }
-        let layout = wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) };
+        let layout = wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(w * 4),
+            rows_per_image: Some(h),
+        };
         if !s.depth {
-            gpu.queue.write_texture(at(texture, 0, 0), bytes, layout, extent(w, h));
+            gpu.queue
+                .write_texture(at(texture, 0, 0), bytes, layout, extent(w, h));
         } else {
             if self.fill.is_none() {
                 self.fill = Some(scoped(gpu, "native z fill", || DepthFill::create(gpu))?);
             }
             let fill = self.fill.as_ref().expect("made above");
-            let (source, source_view) = new_texture(gpu, w, h, wgpu::TextureFormat::R32Uint,
-                                                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                                                    "native z fill")?;
-            gpu.queue.write_texture(at(&source, 0, 0), bytes, layout, extent(w, h));
+            let (source, source_view) = new_texture(
+                gpu,
+                w,
+                h,
+                wgpu::TextureFormat::R32Uint,
+                wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                "native z fill",
+            )?;
+            gpu.queue
+                .write_texture(at(&source, 0, 0), bytes, layout, extent(w, h));
             let bind = group(gpu, &fill.layout, &[view_entry(0, &source_view)]);
-            let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native z fill") });
+            let mut encoder = gpu
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("native z fill"),
+                });
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: None,
                     color_attachments: &[],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view,
-                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
                         stencil_ops: None,
                     }),
                     timestamp_writes: None,
@@ -771,7 +1099,10 @@ impl Surfaces {
     /// not applied), rows unpadded: RGBA8, or depth32float bit patterns. Blocks natively. Replays
     /// and checks (NTRACE.md's `after` blobs).
     pub fn read(&self, gpu: &Gpu, index: usize) -> Result<Vec<u8>, String> {
-        let s = self.list.get(index).ok_or_else(|| format!("gs native: surface {index} (fewer than {SURFACES})"))?;
+        let s = self
+            .list
+            .get(index)
+            .ok_or_else(|| format!("gs native: surface {index} (fewer than {SURFACES})"))?;
         let Some(texture) = &s.texture else {
             return Err(format!("gs native: surface {index} has no texture to read"));
         };
@@ -785,7 +1116,11 @@ impl Surfaces {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native surface read") });
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("native surface read"),
+            });
         let mut from = at(texture, 0, 0);
         if s.depth {
             from.aspect = wgpu::TextureAspect::DepthOnly;
@@ -794,8 +1129,12 @@ impl Surfaces {
         gpu.queue.submit([encoder.finish()]);
         let status = std::sync::Arc::new(std::sync::Mutex::new(None));
         let done = status.clone();
-        buffer.map_async(wgpu::MapMode::Read, .., move |r| *done.lock().unwrap_or_else(|p| p.into_inner()) = Some(r));
-        gpu.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| format!("gs native: poll: {e}"))?;
+        buffer.map_async(wgpu::MapMode::Read, .., move |r| {
+            *done.lock().unwrap_or_else(|p| p.into_inner()) = Some(r)
+        });
+        gpu.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map_err(|e| format!("gs native: poll: {e}"))?;
         match status.lock().unwrap_or_else(|p| p.into_inner()).take() {
             Some(Ok(())) => {}
             Some(Err(e)) => return Err(format!("gs native: surface {index} read: {e}")),
@@ -816,60 +1155,75 @@ impl Surfaces {
 
 impl DepthFill {
     fn create(gpu: &Gpu) -> DepthFill {
-        let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("native z fill"),
-            source: wgpu::ShaderSource::Wgsl(DEPTH_FILL_WGSL.into()),
-        });
-        let layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Uint,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
+        let module = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("native z fill"),
+                source: wgpu::ShaderSource::Wgsl(DEPTH_FILL_WGSL.into()),
+            });
+        let layout = gpu
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Uint,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                }],
+            });
+        let pipeline_layout = gpu
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: None,
+                bind_group_layouts: &[Some(&layout)],
+                immediate_size: 0,
+            });
+        let options = || wgpu::PipelineCompilationOptions {
+            constants: &[],
+            zero_initialize_workgroup_memory: false,
+        };
+        let pipe = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("native z fill"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("fill_vertex"),
+                    compilation_options: options(),
+                    buffers: &[],
                 },
-                count: None,
-            }],
-        });
-        let pipeline_layout = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[Some(&layout)],
-            immediate_size: 0,
-        });
-        let options = || wgpu::PipelineCompilationOptions { constants: &[], zero_initialize_workgroup_memory: false };
-        let pipe = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("native z fill"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("fill_vertex"),
-                compilation_options: options(),
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: Some(true),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fill_depth"),
-                compilation_options: options(),
-                targets: &[],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fill_depth"),
+                    compilation_options: options(),
+                    targets: &[],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
         DepthFill { layout, pipe }
     }
 }
@@ -878,8 +1232,16 @@ impl Native {
     /// `dhdr_native_surface`: surface `index` (< 48) at `scale`, at least w x h scaled pixels; its
     /// texture's size. Err keeps the old texture. Growth is drawn at the next picture's start
     /// (`Surfaces::prepare`).
-    pub fn surface(&mut self, index: u32, scale: u32, w: u32, h: u32, depth: bool) -> Result<[u32; 2], String> {
-        self.surfaces.resources(self.gpu, index as usize, scale, w, h, depth)
+    pub fn surface(
+        &mut self,
+        index: u32,
+        scale: u32,
+        w: u32,
+        h: u32,
+        depth: bool,
+    ) -> Result<[u32; 2], String> {
+        self.surfaces
+            .resources(self.gpu, index as usize, scale, w, h, depth)
     }
 
     /// Surface `index`'s contents from a blob (`Surfaces::fill`; replays).

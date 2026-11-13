@@ -107,5 +107,9 @@ pub const GLYPHS: [[u8; 8]; COUNT] = [
 
 /// The bitmap of `ch`; a space for anything outside printable ASCII.
 pub fn glyph(ch: u8) -> &'static [u8; 8] {
-    if (FIRST..FIRST + COUNT as u8).contains(&ch) { &GLYPHS[(ch - FIRST) as usize] } else { &GLYPHS[0] }
+    if (FIRST..FIRST + COUNT as u8).contains(&ch) {
+        &GLYPHS[(ch - FIRST) as usize]
+    } else {
+        &GLYPHS[0]
+    }
 }

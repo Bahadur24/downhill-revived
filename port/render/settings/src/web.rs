@@ -98,7 +98,13 @@ pub unsafe extern "C" fn dhd_settings_disabled(name: *const u8, name_len: usize)
 /// # Safety
 /// Buffers as `bytes`.
 #[no_mangle]
-pub unsafe extern "C" fn dhd_settings_environment(ini: *const u8, ini_len: usize, stored: i32, set: *const u8, set_len: usize) -> i32 {
+pub unsafe extern "C" fn dhd_settings_environment(
+    ini: *const u8,
+    ini_len: usize,
+    stored: i32,
+    set: *const u8,
+    set_len: usize,
+) -> i32 {
     // SAFETY: the caller's contract.
     let (ini, set) = unsafe { (Ini::parse(bytes(ini, ini_len)), text(set, set_len)) };
     let is_set = |name: &str| set.lines().any(|s| s == name);
@@ -140,7 +146,13 @@ pub unsafe extern "C" fn dhd_settings_save(
     value_len: usize,
 ) -> i32 {
     // SAFETY: the caller's contract.
-    let (ini, key, value) = unsafe { (bytes(ini, ini_len), text(key, key_len), text(value, value_len)) };
+    let (ini, key, value) = unsafe {
+        (
+            bytes(ini, ini_len),
+            text(key, key_len),
+            text(value, value_len),
+        )
+    };
     match edited((stored != 0).then_some(ini), key, value) {
         Ok(ini) => {
             put(ini.bytes().to_vec());
@@ -159,7 +171,12 @@ pub unsafe extern "C" fn dhd_settings_save(
 /// # Safety
 /// Buffers as `bytes`.
 #[no_mangle]
-pub unsafe extern "C" fn dhd_settings_written(ini: *const u8, ini_len: usize, key: *const u8, key_len: usize) -> i32 {
+pub unsafe extern "C" fn dhd_settings_written(
+    ini: *const u8,
+    ini_len: usize,
+    key: *const u8,
+    key_len: usize,
+) -> i32 {
     // SAFETY: the caller's contract.
     let (ini, key) = unsafe { (Ini::parse(bytes(ini, ini_len)), text(key, key_len)) };
     match ini.written(key) {

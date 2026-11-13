@@ -42,7 +42,11 @@ pub(crate) fn scoped<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<
 /// pipeline the driver does not create is an internal error (the vendored wgpu-hal's
 /// `map_pipeline_creation_err`; PowerVR Rogue reports a shader its compilers refuse as out of
 /// memory, finding 176): Err, so that draw is not drawn and the game goes on.
-pub(crate) fn scoped_pipeline<R>(gpu: &Gpu, what: &str, f: impl FnOnce() -> R) -> Result<R, String> {
+pub(crate) fn scoped_pipeline<R>(
+    gpu: &Gpu,
+    what: &str,
+    f: impl FnOnce() -> R,
+) -> Result<R, String> {
     #[cfg(feature = "native")]
     {
         let validation = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -72,7 +76,9 @@ static MESHES_REFUSED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 pub(crate) fn refuse_meshes(why: Option<&str>) {
     if !MESHES_REFUSED.swap(true, std::sync::atomic::Ordering::AcqRel) {
         if let Some(why) = why {
-            crate::host::log(&format!("gs native: Native VU can't run on this GPU ({why}); the VU runs every program"));
+            crate::host::log(&format!(
+                "gs native: Native VU can't run on this GPU ({why}); the VU runs every program"
+            ));
         }
     }
 }
@@ -89,7 +95,11 @@ pub(crate) fn test_refusal() {
     use std::sync::atomic::{AtomicU64, Ordering};
     static AT: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
     static PICTURES: AtomicU64 = AtomicU64::new(0);
-    let Some(at) = *AT.get_or_init(|| std::env::var("DHD_TEST_NO_MESHES").ok().and_then(|v| v.trim().parse().ok())) else {
+    let Some(at) = *AT.get_or_init(|| {
+        std::env::var("DHD_TEST_NO_MESHES")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+    }) else {
         return;
     };
     if PICTURES.fetch_add(1, Ordering::Relaxed) + 1 >= at {
@@ -112,7 +122,12 @@ fn mesh_support(gpu: &Gpu) -> Result<(), Option<String>> {
     if cfg!(target_arch = "wasm32") {
         return Err(None);
     }
-    if !gpu.adapter.get_downlevel_capabilities().flags.contains(wgpu::DownlevelFlags::VERTEX_STORAGE) {
+    if !gpu
+        .adapter
+        .get_downlevel_capabilities()
+        .flags
+        .contains(wgpu::DownlevelFlags::VERTEX_STORAGE)
+    {
         return Err(Some("no storage buffers in vertex shaders".into()));
     }
     if gpu.device.limits().max_storage_buffers_per_shader_stage == 0 {
@@ -127,7 +142,10 @@ fn mesh_support(gpu: &Gpu) -> Result<(), Option<String>> {
 /// wgpu-native's pipeline compilation options: no override constants, workgroup memory not
 /// zero-initialised.
 pub(crate) fn compilation_options() -> wgpu::PipelineCompilationOptions<'static> {
-    wgpu::PipelineCompilationOptions { constants: &[], zero_initialize_workgroup_memory: false }
+    wgpu::PipelineCompilationOptions {
+        constants: &[],
+        zero_initialize_workgroup_memory: false,
+    }
 }
 
 /// The inverse table's length in u32 words (`inverse_table`).
@@ -145,7 +163,12 @@ pub fn inverse_table() -> [u32; INVERSE_WORDS] {
             // memory.c pixel_address for PSMCT16, bp 0, bw 1, inside page 0.
             let (bx, by) = (x / 16, y / 8);
             let block = (by & 1) | (bx & 1) << 1 | (by & 2) << 1 | (bx & 2) << 2 | (by & 4) << 2;
-            let column = (x & 1) << 1 | (x & 2) << 2 | (x & 4) << 2 | (x & 8) >> 3 | (y & 1) << 2 | (y & 6) << 4;
+            let column = (x & 1) << 1
+                | (x & 2) << 2
+                | (x & 4) << 2
+                | (x & 8) >> 3
+                | (y & 1) << 2
+                | (y & 6) << 4;
             inverse[(4096 + block * 128 + column) as usize] = x | y << 8;
         }
     }
@@ -154,7 +177,8 @@ pub fn inverse_table() -> [u32; INVERSE_WORDS] {
             for x in 0..64u32 {
                 // memory.c pixel_address for the 32-bit formats, bp 0, bw 1, inside page 0.
                 let (bx, by) = (x / 8, y / 8);
-                let mut block = (bx & 1) | (by & 1) << 1 | (bx & 2) << 1 | (by & 2) << 2 | (bx & 4) << 2;
+                let mut block =
+                    (bx & 1) | (by & 1) << 1 | (bx & 2) << 1 | (by & 2) << 2 | (bx & 4) << 2;
                 let column = (x & 1) | (x & 6) << 1 | (y & 1) << 1 | (y & 6) << 3;
                 if layout == 1 {
                     block ^= 0x18; // PSMZ32: Z's block XOR
@@ -250,10 +274,11 @@ fn module(gpu: &Gpu, source: &str, label: &str) -> wgpu::ShaderModule {
             source.to_owned()
         }
     };
-    gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some(label),
-        source: wgpu::ShaderSource::Wgsl(source.into()),
-    })
+    gpu.device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        })
 }
 
 /// native.wgsl for the browser's WGSL compiler (task W1, finding 086), with the number of shifts
@@ -318,18 +343,27 @@ pub(crate) fn parenthesize_shifts(src: &str) -> Result<(String, usize), String> 
             while i < b.len() && word(b[i]) {
                 i += 1;
             }
-        } else if c.is_ascii_digit() || (c == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit)) {
+        } else if c.is_ascii_digit() || (c == b'.' && b.get(i + 1).is_some_and(u8::is_ascii_digit))
+        {
             let hex = b[i..].starts_with(b"0x") || b[i..].starts_with(b"0X");
             while i < b.len() && (word(b[i]) || b[i] == b'.') {
-                if !hex && (b[i] == b'e' || b[i] == b'E') && matches!(b.get(i + 1), Some(b'+' | b'-')) {
+                if !hex
+                    && (b[i] == b'e' || b[i] == b'E')
+                    && matches!(b.get(i + 1), Some(b'+' | b'-'))
+                {
                     i += 1;
                 }
                 i += 1;
             }
         } else {
-            const PUNCT: [&[u8]; 21] = [b"<<=", b">>=", b"<<", b">>", b"<=", b">=", b"==", b"!=", b"&&", b"||", b"->",
-                                        b"++", b"--", b"+=", b"-=", b"*=", b"/=", b"%=", b"&=", b"|=", b"^="];
-            i += PUNCT.iter().find(|p| b[i..].starts_with(p)).map_or(1, |p| p.len());
+            const PUNCT: [&[u8]; 21] = [
+                b"<<=", b">>=", b"<<", b">>", b"<=", b">=", b"==", b"!=", b"&&", b"||", b"->",
+                b"++", b"--", b"+=", b"-=", b"*=", b"/=", b"%=", b"&=", b"|=", b"^=",
+            ];
+            i += PUNCT
+                .iter()
+                .find(|p| b[i..].starts_with(p))
+                .map_or(1, |p| p.len());
         }
         tokens.push((start, i));
     }
@@ -340,7 +374,11 @@ pub(crate) fn parenthesize_shifts(src: &str) -> Result<(String, usize), String> 
             &src[tokens[k as usize].0..tokens[k as usize].1]
         }
     };
-    let ident = |s: &str| s.as_bytes().first().is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_');
+    let ident = |s: &str| {
+        s.as_bytes()
+            .first()
+            .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_')
+    };
     let number = |s: &str| {
         let c = s.as_bytes();
         c.first().is_some_and(u8::is_ascii_digit) || (c.len() > 1 && c[0] == b'.')
@@ -379,7 +417,9 @@ pub(crate) fn parenthesize_shifts(src: &str) -> Result<(String, usize), String> 
         Err(unbalanced())
     };
     const TYPES: [&str; 5] = ["u32", "i32", "f32", "f16", "bool"];
-    const TEMPLATED: [&str; 8] = ["vec2", "vec3", "vec4", "mat2x2", "mat3x3", "mat4x4", "array", "bitcast"];
+    const TEMPLATED: [&str; 8] = [
+        "vec2", "vec3", "vec4", "mat2x2", "mat3x3", "mat4x4", "array", "bitcast",
+    ];
     const ARITH: [&str; 5] = ["+", "-", "*", "/", "%"];
     // byte offset -> (closing parentheses, opening parentheses) inserted there
     let mut at: std::collections::BTreeMap<usize, (usize, usize)> = Default::default();
@@ -446,7 +486,10 @@ pub(crate) fn parenthesize_shifts(src: &str) -> Result<(String, usize), String> 
             return Err(unbalanced());
         }
         if ARITH.contains(&t(a - 1)) || ARITH.contains(&t(z + 1)) {
-            let (from, to) = (tokens[(a - 1).max(0) as usize].0, tokens[((z + 1) as usize).min(tokens.len() - 1)].1);
+            let (from, to) = (
+                tokens[(a - 1).max(0) as usize].0,
+                tokens[((z + 1) as usize).min(tokens.len() - 1)].1,
+            );
             return Err(format!("a shift next to arithmetic: `{}`", &src[from..to]));
         }
         at.entry(tokens[a as usize].0).or_default().1 += 1;
@@ -466,14 +509,26 @@ pub(crate) fn parenthesize_shifts(src: &str) -> Result<(String, usize), String> 
 }
 
 fn layout(gpu: &Gpu, entries: &[wgpu::BindGroupLayoutEntry]) -> wgpu::BindGroupLayout {
-    gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries })
+    gpu.device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries,
+        })
 }
 
-fn texture_entry(binding: u32, stage: wgpu::ShaderStages, sample_type: wgpu::TextureSampleType) -> wgpu::BindGroupLayoutEntry {
+fn texture_entry(
+    binding: u32,
+    stage: wgpu::ShaderStages,
+    sample_type: wgpu::TextureSampleType,
+) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: stage,
-        ty: wgpu::BindingType::Texture { sample_type, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false },
+        ty: wgpu::BindingType::Texture {
+            sample_type,
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
         count: None,
     }
 }
@@ -491,58 +546,83 @@ fn storage_texture_entry(binding: u32, format: wgpu::TextureFormat) -> wgpu::Bin
     }
 }
 
-fn pipeline_layout(gpu: &Gpu, uniform: &wgpu::BindGroupLayout, group1: &wgpu::BindGroupLayout) -> wgpu::PipelineLayout {
-    gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: None,
-        bind_group_layouts: &[Some(uniform), Some(group1)],
-        immediate_size: 0,
-    })
+fn pipeline_layout(
+    gpu: &Gpu,
+    uniform: &wgpu::BindGroupLayout,
+    group1: &wgpu::BindGroupLayout,
+) -> wgpu::PipelineLayout {
+    gpu.device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[Some(uniform), Some(group1)],
+            immediate_size: 0,
+        })
 }
 
 /// A full-screen triangle pipeline (`fullscreen_vertex`): a `target` (RGBA8; the present pass: the
 /// surface's format) written whole with no blend, or (None) no colour target and Depth32Float
 /// written with Always.
-fn fullscreen_pipeline(gpu: &Gpu, module: &wgpu::ShaderModule, layout: &wgpu::PipelineLayout, entry: &str,
-                       target: Option<wgpu::TextureFormat>) -> wgpu::RenderPipeline {
+fn fullscreen_pipeline(
+    gpu: &Gpu,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    entry: &str,
+    target: Option<wgpu::TextureFormat>,
+) -> wgpu::RenderPipeline {
     let depth = target.is_none();
-    let target = [target.map(|format| wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })];
-    gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some(entry),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module,
-            entry_point: Some("fullscreen_vertex"),
-            compilation_options: compilation_options(),
-            buffers: &[],
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            cull_mode: None,
-            ..Default::default()
-        },
-        depth_stencil: depth.then(|| pipelines::depth_state(true, wgpu::CompareFunction::Always)),
-        multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-        fragment: Some(wgpu::FragmentState {
+    let target = [target.map(|format| wgpu::ColorTargetState {
+        format,
+        blend: None,
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    gpu.device
+        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(entry),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module,
+                entry_point: Some("fullscreen_vertex"),
+                compilation_options: compilation_options(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: depth
+                .then(|| pipelines::depth_state(true, wgpu::CompareFunction::Always)),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module,
+                entry_point: Some(entry),
+                compilation_options: compilation_options(),
+                targets: if depth { &[] } else { &target },
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+}
+
+fn compute_pipeline(
+    gpu: &Gpu,
+    module: &wgpu::ShaderModule,
+    layout: &wgpu::PipelineLayout,
+    entry: &str,
+) -> wgpu::ComputePipeline {
+    gpu.device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(entry),
+            layout: Some(layout),
             module,
             entry_point: Some(entry),
             compilation_options: compilation_options(),
-            targets: if depth { &[] } else { &target },
-        }),
-        multiview_mask: None,
-        cache: None,
-    })
-}
-
-fn compute_pipeline(gpu: &Gpu, module: &wgpu::ShaderModule, layout: &wgpu::PipelineLayout, entry: &str)
-                    -> wgpu::ComputePipeline {
-    gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(entry),
-        layout: Some(layout),
-        module,
-        entry_point: Some(entry),
-        compilation_options: compilation_options(),
-        cache: None,
-    })
+            cache: None,
+        })
 }
 
 impl Objects {
@@ -559,15 +639,35 @@ impl Objects {
         if format == wgpu::TextureFormat::Rgba8Unorm {
             return &self.present_rgba;
         }
-        self.present_bgra.get_or_init(|| fullscreen_pipeline(gpu, &self.module, &self.draw_layout, "present_pixel", Some(format)))
+        self.present_bgra.get_or_init(|| {
+            fullscreen_pipeline(
+                gpu,
+                &self.module,
+                &self.draw_layout,
+                "present_pixel",
+                Some(format),
+            )
+        })
     }
 
     /// The fill's pipelines (present.rs): `present_shrink` into the small RGBA8 texture, and
     /// `present_fill` into a target of `format` (as `present_pipe`).
-    pub fn fill_pipes(&self, gpu: &Gpu, format: wgpu::TextureFormat) -> (&wgpu::RenderPipeline, &wgpu::RenderPipeline) {
-        let make = |entry: &str, format| fullscreen_pipeline(gpu, &self.module, &self.draw_layout, entry, Some(format));
-        let shrink = self.fill_shrink.get_or_init(|| make("present_shrink", wgpu::TextureFormat::Rgba8Unorm));
-        let fill = if format == wgpu::TextureFormat::Rgba8Unorm { &self.fill_rgba } else { &self.fill_bgra };
+    pub fn fill_pipes(
+        &self,
+        gpu: &Gpu,
+        format: wgpu::TextureFormat,
+    ) -> (&wgpu::RenderPipeline, &wgpu::RenderPipeline) {
+        let make = |entry: &str, format| {
+            fullscreen_pipeline(gpu, &self.module, &self.draw_layout, entry, Some(format))
+        };
+        let shrink = self
+            .fill_shrink
+            .get_or_init(|| make("present_shrink", wgpu::TextureFormat::Rgba8Unorm));
+        let fill = if format == wgpu::TextureFormat::Rgba8Unorm {
+            &self.fill_rgba
+        } else {
+            &self.fill_bgra
+        };
         (shrink, fill.get_or_init(|| make("present_fill", format)))
     }
 
@@ -586,24 +686,46 @@ impl Objects {
         });
 
         let unfilterable = T::Float { filterable: false };
-        let uniform_layout = layout(gpu, &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: S::VERTEX | S::FRAGMENT | S::COMPUTE,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: true, min_binding_size: None },
-            count: None,
-        }]);
-        let texture_layout = layout(gpu, &[
-            texture_entry(0, S::FRAGMENT, T::Float { filterable: true }),
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: S::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        let uniform_layout = layout(
+            gpu,
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: S::VERTEX | S::FRAGMENT | S::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: None,
+                },
                 count: None,
-            },
-        ]);
+            }],
+        );
+        let texture_layout = layout(
+            gpu,
+            &[
+                texture_entry(0, S::FRAGMENT, T::Float { filterable: true }),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: S::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        );
         let texels_layout = layout(gpu, &crate::native::shared::texels_entries());
-        let blit_layout = layout(gpu, &[texture_entry(0, S::FRAGMENT, unfilterable), texture_entry(1, S::FRAGMENT, unfilterable)]);
-        let scanout_layout = layout(gpu, &[texture_entry(0, S::COMPUTE, unfilterable), storage_texture_entry(1, wgpu::TextureFormat::Rgba8Unorm)]);
+        let blit_layout = layout(
+            gpu,
+            &[
+                texture_entry(0, S::FRAGMENT, unfilterable),
+                texture_entry(1, S::FRAGMENT, unfilterable),
+            ],
+        );
+        let scanout_layout = layout(
+            gpu,
+            &[
+                texture_entry(0, S::COMPUTE, unfilterable),
+                storage_texture_entry(1, wgpu::TextureFormat::Rgba8Unorm),
+            ],
+        );
         let mut convert = Vec::with_capacity(11);
         convert.push(wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -629,39 +751,51 @@ impl Objects {
 
         let draw_layout = pipeline_layout(gpu, &uniform_layout, &texture_layout);
         let texels_draw_layout = pipeline_layout(gpu, &uniform_layout, &texels_layout);
-        let draws_layout = layout(gpu, &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: S::VERTEX | S::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: true,
-                min_binding_size: wgpu::BufferSize::new(crate::native::arenas::DRAW_BYTES),
-            },
-            count: None,
-        }]);
+        let draws_layout = layout(
+            gpu,
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: S::VERTEX | S::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(crate::native::arenas::DRAW_BYTES),
+                },
+                count: None,
+            }],
+        );
         let native_draw_layout = pipeline_layout(gpu, &draws_layout, &texture_layout);
         let native_texels_draw_layout = pipeline_layout(gpu, &draws_layout, &texels_layout);
         // The mesh layouts only where the device can read a storage buffer in the vertex stage
         // (Native VU, finding 194): otherwise none, and the VU runs every program.
-        let mesh_layouts = mesh_support(gpu).and_then(|()| scoped(gpu, "the mesh layouts", || {
-            let mesh = layout(gpu, &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: S::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }]);
-            let with = |group1: &wgpu::BindGroupLayout| gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: None,
-                bind_group_layouts: &[Some(&draws_layout), Some(group1), Some(&mesh)],
-                immediate_size: 0,
-            });
-            let (draw, texels) = (with(&texture_layout), with(&texels_layout));
-            (mesh, draw, texels)
-        }).map_err(Some));
+        let mesh_layouts = mesh_support(gpu).and_then(|()| {
+            scoped(gpu, "the mesh layouts", || {
+                let mesh = layout(
+                    gpu,
+                    &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: S::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                );
+                let with = |group1: &wgpu::BindGroupLayout| {
+                    gpu.device
+                        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                            label: None,
+                            bind_group_layouts: &[Some(&draws_layout), Some(group1), Some(&mesh)],
+                            immediate_size: 0,
+                        })
+                };
+                let (draw, texels) = (with(&texture_layout), with(&texels_layout));
+                (mesh, draw, texels)
+            })
+            .map_err(Some)
+        });
         let (mesh_layout, mesh_draw_layout, mesh_texels_draw_layout) = match mesh_layouts {
             Ok((mesh, draw, texels)) => (Some(mesh), Some(draw), Some(texels)),
             Err(why) => {
@@ -676,11 +810,19 @@ impl Objects {
 
         let rgba = Some(wgpu::TextureFormat::Rgba8Unorm);
         let blit_pipe = fullscreen_pipeline(gpu, &main, &blit_pipeline_layout, "native_blit", rgba);
-        let upload_pipe = fullscreen_pipeline(gpu, &main, &blit_pipeline_layout, "native_upload_alpha", rgba);
+        let upload_pipe = fullscreen_pipeline(
+            gpu,
+            &main,
+            &blit_pipeline_layout,
+            "native_upload_alpha",
+            rgba,
+        );
         let present_rgba = fullscreen_pipeline(gpu, &main, &draw_layout, "present_pixel", rgba);
-        let grow_pipe = fullscreen_pipeline(gpu, &main, &grow_pipeline_layout, "native_grow_depth", None);
+        let grow_pipe =
+            fullscreen_pipeline(gpu, &main, &grow_pipeline_layout, "native_grow_depth", None);
         let scanout_pipe = compute_pipeline(gpu, &main, &scanout_pipeline_layout, "native_scanout");
-        let scanout_fast_pipe = compute_pipeline(gpu, &main, &scanout_pipeline_layout, "native_scanout_fast");
+        let scanout_fast_pipe =
+            compute_pipeline(gpu, &main, &scanout_pipeline_layout, "native_scanout_fast");
         let convert_pipe = compute_pipeline(gpu, &main, &convert_pipeline_layout, "native_convert");
 
         let table = inverse_table();
@@ -790,7 +932,10 @@ mod tests {
             let mut seen = vec![false; 64 * height];
             for &at in &table[start..start + words] {
                 let (x, y) = ((at & 255) as usize, (at >> 8) as usize);
-                assert!(x < 64 && y < height && !seen[y * 64 + x], "layout at {start}: pixel {x}, {y}");
+                assert!(
+                    x < 64 && y < height && !seen[y * 64 + x],
+                    "layout at {start}: pixel {x}, {y}"
+                );
                 seen[y * 64 + x] = true;
             }
         }
@@ -801,13 +946,24 @@ mod tests {
     #[test]
     fn shifts_get_parentheses() {
         let p = |s: &str| parenthesize_shifts(s).map(|(t, _)| t);
-        assert_eq!(p("let S = nat.scale >> 8u & 255u;").unwrap(), "let S = (nat.scale >> 8u) & 255u;");
-        assert_eq!(p("x = (a & 1u) | b[i].c << 2u | f(y) >> 1u ^ -z << w.x;").unwrap(),
-                   "x = (a & 1u) | (b[i].c << 2u) | (f(y) >> 1u) ^ (-z << w.x);");
-        assert_eq!(p("v = vec2<u32>(t.x, t.y >> b.w); /* a >> b & c */ // d << e | f").unwrap(),
-                   "v = vec2<u32>(t.x, (t.y >> b.w)); /* a >> b & c */ // d << e | f");
-        let templates = "var<storage> v: array<vec4<u32>>; let w = bitcast<vec2<u32>>(z); let k = 1u <<= 2u;";
-        assert_eq!(parenthesize_shifts(templates).unwrap(), (templates.to_owned(), 0));
+        assert_eq!(
+            p("let S = nat.scale >> 8u & 255u;").unwrap(),
+            "let S = (nat.scale >> 8u) & 255u;"
+        );
+        assert_eq!(
+            p("x = (a & 1u) | b[i].c << 2u | f(y) >> 1u ^ -z << w.x;").unwrap(),
+            "x = (a & 1u) | (b[i].c << 2u) | (f(y) >> 1u) ^ (-z << w.x);"
+        );
+        assert_eq!(
+            p("v = vec2<u32>(t.x, t.y >> b.w); /* a >> b & c */ // d << e | f").unwrap(),
+            "v = vec2<u32>(t.x, (t.y >> b.w)); /* a >> b & c */ // d << e | f"
+        );
+        let templates =
+            "var<storage> v: array<vec4<u32>>; let w = bitcast<vec2<u32>>(z); let k = 1u <<= 2u;";
+        assert_eq!(
+            parenthesize_shifts(templates).unwrap(),
+            (templates.to_owned(), 0)
+        );
         assert!(parenthesize_shifts("let q = x - y << 2u;").is_err());
         assert!(parenthesize_shifts("let q = x << y * 2u;").is_err());
     }
@@ -819,7 +975,8 @@ mod tests {
     fn native_wgsl_keeps_its_meaning() {
         use crate::shaders::{NATIVE, NATIVE_DUAL};
         fn module(src: &str) -> String {
-            let m = naga::front::wgsl::parse_str(src).unwrap_or_else(|e| panic!("{}", e.emit_to_string(src)));
+            let m = naga::front::wgsl::parse_str(src)
+                .unwrap_or_else(|e| panic!("{}", e.emit_to_string(src)));
             let text = format!("{m:?}");
             let mut out = String::with_capacity(text.len());
             let mut rest = text.as_str();
@@ -841,6 +998,9 @@ mod tests {
         // Negative control: the other grouping is a different module.
         const LINE: &str = "nat.scale >> 8u & 255u";
         assert!(NATIVE.contains(LINE));
-        assert_ne!(module(NATIVE), module(&NATIVE.replacen(LINE, "nat.scale >> (8u & 255u)", 1)));
+        assert_ne!(
+            module(NATIVE),
+            module(&NATIVE.replacen(LINE, "nat.scale >> (8u & 255u)", 1))
+        );
     }
 }

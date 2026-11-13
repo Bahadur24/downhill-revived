@@ -13,7 +13,9 @@ pub struct P2pStar {
 impl P2pStar {
     #[wasm_bindgen(constructor)]
     pub fn new(direct: bool) -> P2pStar {
-        Self { inner: Star::new(direct) }
+        Self {
+            inner: Star::new(direct),
+        }
     }
     /// A room message (JSON text): the welcome and the routes count, anything else is ignored.
     pub fn room(&mut self, message: &str) {
@@ -28,7 +30,8 @@ impl P2pStar {
         self.inner.game_frame(frame);
     }
     pub fn peer_message(&mut self, from: u32, reliable: bool, bytes: &[u8], now: f64) {
-        self.inner.peer_message(from as u64, reliable, bytes, now as u64);
+        self.inner
+            .peer_message(from as u64, reliable, bytes, now as u64);
     }
     pub fn sfu_frame(&mut self, from: u32, frame: &[u8]) {
         self.inner.sfu_frame(from as u64, frame.to_vec());
@@ -42,14 +45,23 @@ impl P2pStar {
     }
     /// The actions since the last call, as a JSON array of {kind, ...}.
     pub fn drain(&mut self) -> String {
-        let actions: Vec<Value> = self.inner.take().into_iter().map(|a| match a {
-            Action::Connect { member, offerer } => json!({"kind": "connect", "member": member, "offerer": offerer}),
-            Action::Close(member) => json!({"kind": "close", "member": member}),
-            Action::Peer(to, reliable, bytes) => json!({"kind": "peer", "to": to, "reliable": reliable, "bytes": bytes}),
-            Action::Sfu(frame) => json!({"kind": "sfu", "bytes": frame}),
-            Action::Game(frame) => json!({"kind": "game", "bytes": frame}),
-            Action::Room(message) => json!({"kind": "room", "message": message}),
-        }).collect();
+        let actions: Vec<Value> = self
+            .inner
+            .take()
+            .into_iter()
+            .map(|a| match a {
+                Action::Connect { member, offerer } => {
+                    json!({"kind": "connect", "member": member, "offerer": offerer})
+                }
+                Action::Close(member) => json!({"kind": "close", "member": member}),
+                Action::Peer(to, reliable, bytes) => {
+                    json!({"kind": "peer", "to": to, "reliable": reliable, "bytes": bytes})
+                }
+                Action::Sfu(frame) => json!({"kind": "sfu", "bytes": frame}),
+                Action::Game(frame) => json!({"kind": "game", "bytes": frame}),
+                Action::Room(message) => json!({"kind": "room", "message": message}),
+            })
+            .collect();
         Value::Array(actions).to_string()
     }
 }

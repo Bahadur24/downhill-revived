@@ -25,7 +25,11 @@ pub fn switch(name: &str) -> bool {
 /// The ordinary native render loop only; interpolation does not use its publication hook.
 pub fn folded() -> bool {
     switch("DHD_ZREAD_FOLD")
-        && std::env::var("DHD_INTERP").ok().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0) == 0
+        && std::env::var("DHD_INTERP")
+            .ok()
+            .and_then(|s| s.parse::<i32>().ok())
+            .unwrap_or(0)
+            == 0
 }
 
 pub(crate) const ZREAD_WGSL: &str = r#"
@@ -61,51 +65,82 @@ pub struct ZRead {
     request: Option<(u32, [u32; 4], u64)>,
     recording: bool,
     current: Option<u64>,
-
 }
 
 impl ZRead {
     pub fn new() -> ZRead {
-        ZRead { pipe: None, slots: Vec::new(), folded: folded(),
-                request: None, recording: false, current: None }
+        ZRead {
+            pipe: None,
+            slots: Vec::new(),
+            folded: folded(),
+            request: None,
+            recording: false,
+            current: None,
+        }
     }
 }
 
 fn pipe(gpu: &crate::device::Gpu) -> (wgpu::BindGroupLayout, wgpu::ComputePipeline) {
-    let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("native zread"),
-        source: wgpu::ShaderSource::Wgsl(ZREAD_WGSL.into()),
-    });
-    let entry = |binding, ty| wgpu::BindGroupLayoutEntry { binding, visibility: wgpu::ShaderStages::COMPUTE, ty, count: None };
-    let layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("native zread"),
-        entries: &[
-            entry(0, wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Depth,
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            }),
-            entry(1, wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            }),
-            entry(2, wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None }),
-        ],
-    });
-    let pipeline_layout = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("native zread"),
-        bind_group_layouts: &[Some(&layout)],
-        immediate_size: 0,
-    });
-    let pipeline = gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("native zread"),
-        layout: Some(&pipeline_layout),
-        module: &module,
-        entry_point: Some("zread"),
-        compilation_options: crate::native::init::compilation_options(),
-        cache: None,
-    });
+    let module = gpu
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("native zread"),
+            source: wgpu::ShaderSource::Wgsl(ZREAD_WGSL.into()),
+        });
+    let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::COMPUTE,
+        ty,
+        count: None,
+    };
+    let layout = gpu
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("native zread"),
+            entries: &[
+                entry(
+                    0,
+                    wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                ),
+                entry(
+                    1,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                ),
+                entry(
+                    2,
+                    wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                ),
+            ],
+        });
+    let pipeline_layout = gpu
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("native zread"),
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
+        });
+    let pipeline = gpu
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("native zread"),
+            layout: Some(&pipeline_layout),
+            module: &module,
+            entry_point: Some("zread"),
+            compilation_options: crate::native::init::compilation_options(),
+            cache: None,
+        });
     (layout, pipeline)
 }
 
@@ -121,8 +156,12 @@ impl Native {
         }
         let whole = crate::native::render::rstat::T::new();
         let gpu = self.gpu;
-        let Some(s) = self.surfaces.get(index as usize) else { return 0 };
-        let (Some(view), true) = (s.view.as_ref(), s.depth) else { return 0 };
+        let Some(s) = self.surfaces.get(index as usize) else {
+            return 0;
+        };
+        let (Some(view), true) = (s.view.as_ref(), s.depth) else {
+            return 0;
+        };
         let scale = s.scale.max(1);
         let (cols, rows) = (s.size[0] / scale, s.size[1] / scale);
         let [x, y, w, h] = rect;
@@ -135,19 +174,42 @@ impl Native {
             self.zread.pipe = Some(pipe(gpu));
         }
         if self.zread.slots.len() < SLOTS && self.zread.slots.iter().all(|s| s.status.is_some()) {
-            let buffer = |label, size, usage| gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
+            let buffer = |label, size, usage| {
+                gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(label),
+                    size,
+                    usage,
+                    mapped_at_creation: false,
+                })
+            };
             self.zread.slots.push(Slot {
-                storage: buffer("native zread", BYTES, wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC),
-                read: buffer("native zread map", BYTES, wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
-                params: buffer("native zread params", 32, wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST),
+                storage: buffer(
+                    "native zread",
+                    BYTES,
+                    wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                ),
+                read: buffer(
+                    "native zread map",
+                    BYTES,
+                    wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                ),
+                params: buffer(
+                    "native zread params",
+                    32,
+                    wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                ),
                 status: None,
                 rect: [0; 4],
                 tag: 0,
                 needs_map: false,
             });
         }
-        let Some((layout, pipeline)) = self.zread.pipe.as_ref() else { return 0 };
-        let Some(slot) = self.zread.slots.iter_mut().find(|s| s.status.is_none()) else { return 0 };
+        let Some((layout, pipeline)) = self.zread.pipe.as_ref() else {
+            return 0;
+        };
+        let Some(slot) = self.zread.slots.iter_mut().find(|s| s.status.is_none()) else {
+            return 0;
+        };
         let params: [u32; 8] = [x, y, w, h, scale, 0, 0, 0];
         let mut bytes = [0u8; 32];
         for (i, v) in params.iter().enumerate() {
@@ -158,20 +220,36 @@ impl Native {
             label: Some("native zread"),
             layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
-                wgpu::BindGroupEntry { binding: 1, resource: slot.storage.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 2, resource: slot.params.as_entire_binding() },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: slot.storage.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: slot.params.as_entire_binding(),
+                },
             ],
         });
-        let mut separate = (!self.zread.folded).then(|| gpu.device.create_command_encoder(
-            &wgpu::CommandEncoderDescriptor { label: Some("native zread") }));
+        let mut separate = (!self.zread.folded).then(|| {
+            gpu.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("native zread"),
+                })
+        });
         let encoder = match separate.as_mut() {
             Some(encoder) => encoder,
             None => self.pass.encoder(gpu),
         };
         {
             crate::native::render::pass_trace::event("compute-zprobe", -1, -1);
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("native zread"), timestamp_writes: None });
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("native zread"),
+                timestamp_writes: None,
+            });
             pass.set_pipeline(pipeline);
             pass.set_bind_group(0, &group, &[]);
             pass.dispatch_workgroups(w.div_ceil(8), h.div_ceil(8), 1);
@@ -182,9 +260,9 @@ impl Native {
             // Reserve the slot until the picture is submitted; mapping starts only afterwards.
             slot.status = Some(std::sync::Arc::new(std::sync::Mutex::new(None)));
             slot.needs_map = true;
-
         } else {
-            gpu.queue.submit([separate.expect("separate probe encoder").finish()]);
+            gpu.queue
+                .submit([separate.expect("separate probe encoder").finish()]);
             slot.status = Some(map_start(&slot.read, 0..used));
         }
         slot.rect = [x, y, w, h];
@@ -206,7 +284,10 @@ impl Native {
     pub fn zread_map(&mut self) {
         for slot in &mut self.zread.slots {
             if slot.needs_map {
-                slot.status = Some(map_start(&slot.read, 0..(slot.rect[2] * slot.rect[3] * 4) as u64));
+                slot.status = Some(map_start(
+                    &slot.read,
+                    0..(slot.rect[2] * slot.rect[3] * 4) as u64,
+                ));
                 slot.needs_map = false;
             }
         }
@@ -229,16 +310,27 @@ impl Native {
         let current = self.zread.current;
         let folded = self.zread.folded;
         let done = |s: &Slot| {
-            (!folded || current != Some(s.tag)) && s.status.as_ref().is_some_and(|m| m.lock().unwrap_or_else(|p| p.into_inner()).is_some())
+            (!folded || current != Some(s.tag))
+                && s.status
+                    .as_ref()
+                    .is_some_and(|m| m.lock().unwrap_or_else(|p| p.into_inner()).is_some())
         };
-        let newest = self.zread.slots.iter().filter(|s| done(s)).map(|s| s.tag).max();
+        let newest = self
+            .zread
+            .slots
+            .iter()
+            .filter(|s| done(s))
+            .map(|s| s.tag)
+            .max();
         let Some(newest) = newest else { return 0 };
         let mut taken = 0;
         for s in self.zread.slots.iter_mut() {
             if !done(s) || s.tag > newest {
                 continue;
             }
-            let ok = s.status.as_ref().is_some_and(|m| matches!(*m.lock().unwrap_or_else(|p| p.into_inner()), Some(Ok(()))));
+            let ok = s.status.as_ref().is_some_and(|m| {
+                matches!(*m.lock().unwrap_or_else(|p| p.into_inner()), Some(Ok(())))
+            });
             if s.tag == newest && ok {
                 let [_, _, w, h] = s.rect;
                 let count = (w * h) as usize;
@@ -249,8 +341,10 @@ impl Native {
                     // picture on the throttled phone (finding 146).
                     let words = &mut out[..count];
                     // SAFETY: the u32s' bytes, as many as `words` holds, all of them written here.
-                    unsafe { std::slice::from_raw_parts_mut(words.as_mut_ptr().cast::<u8>(), count * 4) }
-                        .copy_from_slice(&data[..count * 4]);
+                    unsafe {
+                        std::slice::from_raw_parts_mut(words.as_mut_ptr().cast::<u8>(), count * 4)
+                    }
+                    .copy_from_slice(&data[..count * 4]);
                     for word in words.iter_mut() {
                         *word = u32::from_le(*word);
                     }

@@ -269,10 +269,12 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
         # guest address as a native pointer without checking its entire span.
         strings = {
             'host_service_host_setting_save': (0,1),
+            'host_service_host_setting_read': (0,),
             'host_service_host_setting_locked': (0,),
             'host_service_gs_window_title': (0,),
             'host_service_movie_start': (0,), 'host_service_text_input_edit': (2,),
             'host_service_net_init': (0,1,2,3), 'host_service_net_join_room': (0,),
+            'host_service_net_host_tailnet': (0,), 'host_service_net_join_tailnet_pin': (0,1),
             'host_service_gs_capture_request': (0,),
             'host_service_disc_check_start': (0,1), 'host_service_clipboard_set': (0,),
         }
@@ -302,6 +304,8 @@ static void region_callback(uintptr_t lo, uintptr_t hi, int host) {
             'host_service_gs_trace_pop': [(0,'host_service_gs_trace_size()')],
             'host_frame_registers': [(0,'20')], 'host_console_write': [(0,'a1')],
             'host_service_host_game_options_read': [(0,'a1')],
+            'host_service_host_setting_read': [(1,'a2')],
+            'host_service_net_discover_lan_poll': [(0,'host64_bridge_array_bytes((int32_t)a1,sizeof(NetLanRoom))')],
             'host_service_text_input_edit': [(0,'host64_bridge_array_bytes((int32_t)a1,1)')],
             'host_vu1_snapshot': [(0,'2096')], 'host_vu1_file': [(0,'1024')],
             'host_service_controls_layout': [(1,'52')],

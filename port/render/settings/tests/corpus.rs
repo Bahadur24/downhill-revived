@@ -8,7 +8,12 @@ use std::fs;
 
 fn env_of(text: &str, set: &[&str]) -> BTreeMap<String, String> {
     let ini = Ini::parse(text.as_bytes());
-    environment(Some(&ini), |n| set.iter().any(|s| s.eq_ignore_ascii_case(n))).vars.into_iter().collect()
+    environment(Some(&ini), |n| {
+        set.iter().any(|s| s.eq_ignore_ascii_case(n))
+    })
+    .vars
+    .into_iter()
+    .collect()
 }
 
 fn saved(text: &[u8], key: &str, value: &str) -> Vec<u8> {
@@ -34,8 +39,14 @@ fn empty_and_duplicate_keys() {
     assert_eq!(ini.value("scale"), "2");
     assert_eq!(env_of("scale =\n", &[])["DHD_SCALE"], "2");
     // A key's variable name is another spelling of it, in either order.
-    assert_eq!(Ini::parse(b"DHD_SCALE = 5\nscale = 3\n").value("scale"), "5");
-    assert_eq!(Ini::parse(b"Scale = 6\ndhd_scale = 3\n").value("SCALE"), "6");
+    assert_eq!(
+        Ini::parse(b"DHD_SCALE = 5\nscale = 3\n").value("scale"),
+        "5"
+    );
+    assert_eq!(
+        Ini::parse(b"Scale = 6\ndhd_scale = 3\n").value("SCALE"),
+        "6"
+    );
     assert_eq!(env_of("dhd_scale = 5\nscale = 3\n", &[])["DHD_SCALE"], "5");
 }
 
@@ -45,7 +56,10 @@ fn comments_sections_and_quotes() {
                 server = ; none\nname = A#B\niso = \"D:\\Games\\a;b #1.iso\" ; the disc\ntexture_pack = \"unclosed\n  fps\t=\t120\t\n";
     let ini = Ini::parse(text.as_bytes());
     assert_eq!(ini.value("scale"), "3");
-    assert_eq!(ini.written("window").as_deref(), Some("windowed# not a comment"));
+    assert_eq!(
+        ini.written("window").as_deref(),
+        Some("windowed# not a comment")
+    );
     assert_eq!(ini.written("server"), None);
     assert_eq!(ini.value("server"), OFFICIAL_SERVER);
     assert_eq!(ini.written("name").as_deref(), Some("A#B"));
@@ -61,17 +75,41 @@ fn values_as_the_game_reads_them() {
     let text = "vibration = off\ntextures = 0\nfont = OFF\nrenderer = whatever\nskip_movies = yes\nvsync = 2\n\
                 widescreen = 21:9\nwindow = Borderless\nunlock_all = false\ndiscord = no\n";
     let ini = Ini::parse(text.as_bytes());
-    for (key, want) in [("vibration", "0"), ("textures", "off"), ("font", "original"), ("renderer", "exact"), ("skip_movies", "1"),
-                        ("vsync", "1"), ("widescreen", "21:9"), ("window", "borderless"), ("unlock_all", "0"), ("discord", "off")] {
+    for (key, want) in [
+        ("vibration", "0"),
+        ("textures", "off"),
+        ("font", "original"),
+        ("renderer", "exact"),
+        ("skip_movies", "1"),
+        ("vsync", "1"),
+        ("widescreen", "21:9"),
+        ("window", "borderless"),
+        ("unlock_all", "0"),
+        ("discord", "off"),
+    ] {
         assert_eq!(ini.value(key), want, "{key}");
     }
     let env = env_of(text, &[]);
-    for (name, want) in [("DHD_VIBRATION", "0"), ("DHD_TEXTURES", "off"), ("DHD_FONT", "original"), ("DHD_RENDER", "exact"),
-                         ("DHD_SKIP_MOVIES", "1"), ("DHD_WIDESCREEN", "21:9"), ("DHD_WINDOW", "borderless"), ("DHD_DISCORD", "off")] {
+    for (name, want) in [
+        ("DHD_VIBRATION", "0"),
+        ("DHD_TEXTURES", "off"),
+        ("DHD_FONT", "original"),
+        ("DHD_RENDER", "exact"),
+        ("DHD_SKIP_MOVIES", "1"),
+        ("DHD_WIDESCREEN", "21:9"),
+        ("DHD_WINDOW", "borderless"),
+        ("DHD_DISCORD", "off"),
+    ] {
         assert_eq!(env[name], want, "{name}");
     }
-    assert_eq!(dhd_settings::find("font").unwrap().label("0"), Some("Original"));
-    assert_eq!(dhd_settings::find("DHD_ASPECT").unwrap().label("WIDE"), Some("Wide"));
+    assert_eq!(
+        dhd_settings::find("font").unwrap().label("0"),
+        Some("Original")
+    );
+    assert_eq!(
+        dhd_settings::find("DHD_ASPECT").unwrap().label("WIDE"),
+        Some("Wide")
+    );
 }
 
 #[test]
@@ -82,9 +120,17 @@ fn environment_overrides_and_defaults() {
     assert_eq!(env["DHD_SCALE"], "4");
     assert!(!env.contains_key("DHD_FPS") && !env.contains_key("DHD_WINDOW"));
     assert_eq!(env["DHD_ENV_OVERRIDES"], ",DHD_WINDOW,DHD_FPS,");
-    for (name, want) in [("DHD_RENDER", "native"), ("DHD_WIDESCREEN", "1"), ("DHD_ASPECT", "wide"), ("DHD_SKIP_MOVIES", "1"),
-                         ("DHD_VSYNC", "1"), ("DHD_WINDOW_WIDTH", "monitor"), ("DHD_WINDOW_HEIGHT", "monitor"),
-                         ("DHD_NET_SERVER", OFFICIAL_SERVER), ("DHD_DISCORD", "on")] {
+    for (name, want) in [
+        ("DHD_RENDER", "native"),
+        ("DHD_WIDESCREEN", "1"),
+        ("DHD_ASPECT", "wide"),
+        ("DHD_SKIP_MOVIES", "1"),
+        ("DHD_VSYNC", "1"),
+        ("DHD_WINDOW_WIDTH", "monitor"),
+        ("DHD_WINDOW_HEIGHT", "monitor"),
+        ("DHD_NET_SERVER", OFFICIAL_SERVER),
+        ("DHD_DISCORD", "on"),
+    ] {
         assert_eq!(env[name], want, "{name}");
     }
     assert!(!env.contains_key("DHD_ISO") && !env.contains_key("DHD_NET_NAME"));
@@ -108,12 +154,19 @@ fn environment_overrides_and_defaults() {
     let env = env_of("", &["DHD_WINDOW_HEIGHT"]);
     assert!(!env.contains_key("DHD_WINDOW_WIDTH"));
     // A server line names another server; an empty one is the official.
-    assert_eq!(env_of("server = wss://races.example.org\n", &[])["DHD_NET_SERVER"], "wss://races.example.org");
+    assert_eq!(
+        env_of("server = wss://races.example.org\n", &[])["DHD_NET_SERVER"],
+        "wss://races.example.org"
+    );
     assert_eq!(env_of("server =\n", &[])["DHD_NET_SERVER"], OFFICIAL_SERVER);
     // effective: the environment over the file.
     let ini = Ini::parse(b"update_url = https://a.example/latest.json\nscale = 3\n");
-    let var = |n: &str| (n == "DHD_UPDATE_URL").then(|| "https://b.example/latest.json".to_string());
-    assert_eq!(ini.effective("update_url", var), "https://b.example/latest.json");
+    let var =
+        |n: &str| (n == "DHD_UPDATE_URL").then(|| "https://b.example/latest.json".to_string());
+    assert_eq!(
+        ini.effective("update_url", var),
+        "https://b.example/latest.json"
+    );
     assert_eq!(ini.effective("scale", var), "3");
 }
 
@@ -140,7 +193,10 @@ fn saves_keep_every_other_line() {
     text.extend_from_slice(b"iso = \"D:\\a;b.iso\"\r\nfoo = bar\r\nfont = sharp");
     let after = saved(&text, "scale", "4");
     let mut want = text.clone();
-    let at = want.windows(15).position(|w| w == b"Scale = 2 ; two").unwrap();
+    let at = want
+        .windows(15)
+        .position(|w| w == b"Scale = 2 ; two")
+        .unwrap();
     want.splice(at..at + 15, b"scale = 4".iter().copied());
     assert_eq!(after, want);
     // a new key at the end, with the file's line ending; the missing last one is added first
@@ -155,27 +211,46 @@ fn saves_keep_every_other_line() {
     let after = saved(b"\xEF\xBB\xBFscale = 2\nfps = 60\n", "scale", "3");
     assert_eq!(after, b"\xEF\xBB\xBFscale = 3\nfps = 60\n");
     // the setting's other lines (duplicates, its DHD_* spelling) go; the first keeps its place
-    let after = saved(b"a = 1\nDHD_SCALE = 5\nb = 2\nscale =\nscale = 3\nc = 3\n", "scale", "6");
+    let after = saved(
+        b"a = 1\nDHD_SCALE = 5\nb = 2\nscale =\nscale = 3\nc = 3\n",
+        "scale",
+        "6",
+    );
     assert_eq!(after, b"a = 1\nscale = 6\nb = 2\nc = 3\n");
     let ini = Ini::parse(&after);
     assert_eq!(ini.value("scale"), "6");
     // quotes where the value needs them; an empty value
     let after = saved(b"", "iso", "D:\\x;y.iso");
     assert_eq!(after, b"iso = \"D:\\x;y.iso\"\n");
-    assert_eq!(Ini::parse(&after).written("iso").as_deref(), Some("D:\\x;y.iso"));
+    assert_eq!(
+        Ini::parse(&after).written("iso").as_deref(),
+        Some("D:\\x;y.iso")
+    );
     assert_eq!(saved(b"server = wss://a\n", "server", ""), b"server =\n");
     // the window size: both lines
     let after = saved(b"width = 896\nheight = 672\n", "size", "1920x1080");
     assert_eq!(after, b"width = 1920\nheight = 1080\n");
     assert_eq!(Ini::parse(&after).value("size"), "1920x1080");
     assert_eq!(Ini::parse(b"").value("size"), "monitor");
-    assert_eq!(Ini::parse(b"width = monitor\nheight = monitor\n").value("size"), "monitor");
+    assert_eq!(
+        Ini::parse(b"width = monitor\nheight = monitor\n").value("size"),
+        "monitor"
+    );
     assert_eq!(Ini::parse(b"width = 1280\n").value("size"), "1280x672");
     // what no line can hold
     let mut ini = Ini::parse(b"");
-    assert!(ini.set("a b", "1").is_err() && ini.set("key", "two\nlines").is_err() && ini.set("size", "big").is_err());
+    assert!(
+        ini.set("a b", "1").is_err()
+            && ini.set("key", "two\nlines").is_err()
+            && ini.set("size", "big").is_err()
+    );
     // a round trip of the whole corpus: saving a value again changes nothing
-    for text in [&b"scale = 4\r\n; x\r\n"[..], b"; only a comment", b"", b"[s]\nfps = 120\n"] {
+    for text in [
+        &b"scale = 4\r\n; x\r\n"[..],
+        b"; only a comment",
+        b"",
+        b"[s]\nfps = 120\n",
+    ] {
         let once = saved(text, "fps", "144");
         assert_eq!(saved(&once, "fps", "144"), once);
     }
@@ -188,7 +263,10 @@ fn files() {
     let p = dir.join("dhd.ini");
     assert!(dhd_settings::read(&p).is_none());
     assert!(dhd_settings::save(&p, "scale", "3").unwrap());
-    assert_eq!(fs::read_to_string(&p).unwrap(), format!("{}scale = 3\n", dhd_settings::HEADER));
+    assert_eq!(
+        fs::read_to_string(&p).unwrap(),
+        format!("{}scale = 3\n", dhd_settings::HEADER)
+    );
     assert!(!dir.join("dhd.ini.new").exists());
     dhd_settings::create(&p).unwrap();
     assert_eq!(dhd_settings::read(&p).unwrap().value("scale"), "3");
@@ -210,11 +288,17 @@ fn c_interface() {
     static SET: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
     unsafe extern "C" fn get(name: *const c_char) -> *const c_char {
         let name = unsafe { CStr::from_ptr(name) }.to_str().unwrap();
-        if name == "DHD_FPS" { c"240".as_ptr() } else { std::ptr::null() }
+        if name == "DHD_FPS" {
+            c"240".as_ptr()
+        } else {
+            std::ptr::null()
+        }
     }
     unsafe extern "C" fn set(name: *const c_char, value: *const c_char) {
         let (n, v) = unsafe { (CStr::from_ptr(name), CStr::from_ptr(value)) };
-        SET.lock().unwrap().push((n.to_str().unwrap().into(), v.to_str().unwrap().into()));
+        SET.lock()
+            .unwrap()
+            .push((n.to_str().unwrap().into(), v.to_str().unwrap().into()));
     }
     let dir = std::env::temp_dir().join(format!("dhd-settings-c-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -222,21 +306,51 @@ fn c_interface() {
     fs::write(&p, "fps = 120\ngame_options = 1 800\n").unwrap();
     let path = CString::new(p.to_str().unwrap()).unwrap();
     unsafe {
-        assert_eq!(dhd_settings::c::dhd_settings_load(path.as_ptr(), get, set, None), 1);
-        assert_eq!(dhd_settings::c::dhd_settings_save(path.as_ptr(), c"scale".as_ptr(), c"5".as_ptr()), 1);
+        assert_eq!(
+            dhd_settings::c::dhd_settings_load(path.as_ptr(), get, set, None),
+            1
+        );
+        assert_eq!(
+            dhd_settings::c::dhd_settings_save(path.as_ptr(), c"scale".as_ptr(), c"5".as_ptr()),
+            1
+        );
         let mut out = [0 as c_char; 8];
-        assert_eq!(dhd_settings::c::dhd_settings_read(path.as_ptr(), c"game_options".as_ptr(), out.as_mut_ptr(), out.len()), 1);
+        assert_eq!(
+            dhd_settings::c::dhd_settings_read(
+                path.as_ptr(),
+                c"game_options".as_ptr(),
+                out.as_mut_ptr(),
+                out.len()
+            ),
+            1
+        );
         assert_eq!(CStr::from_ptr(out.as_ptr()).to_str().unwrap(), "1 800");
         let mut short = [0 as c_char; 3];
-        dhd_settings::c::dhd_settings_read(path.as_ptr(), c"game_options".as_ptr(), short.as_mut_ptr(), short.len());
+        dhd_settings::c::dhd_settings_read(
+            path.as_ptr(),
+            c"game_options".as_ptr(),
+            short.as_mut_ptr(),
+            short.len(),
+        );
         assert_eq!(CStr::from_ptr(short.as_ptr()).to_str().unwrap(), "1 ");
-        assert_eq!(dhd_settings::c::dhd_settings_read(path.as_ptr(), c"iso".as_ptr(), out.as_mut_ptr(), out.len()), 0);
+        assert_eq!(
+            dhd_settings::c::dhd_settings_read(
+                path.as_ptr(),
+                c"iso".as_ptr(),
+                out.as_mut_ptr(),
+                out.len()
+            ),
+            0
+        );
     }
     let set: BTreeMap<_, _> = SET.lock().unwrap().iter().cloned().collect();
     assert!(!set.contains_key("DHD_FPS"));
     assert_eq!(set["DHD_ENV_OVERRIDES"], ",DHD_FPS,");
     assert_eq!(set["DHD_SCALE"], "2");
-    assert_eq!(fs::read_to_string(&p).unwrap(), "fps = 120\ngame_options = 1 800\nscale = 5\n");
+    assert_eq!(
+        fs::read_to_string(&p).unwrap(),
+        "fps = 120\ngame_options = 1 800\nscale = 5\n"
+    );
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -258,7 +372,10 @@ fn install_id() {
     fs::write(&p, "fps = 120\ninstall_id = not-an-id\n").unwrap();
     let (id, kept) = install::get(&p);
     assert!(install::valid(&id) && kept);
-    assert_eq!(fs::read_to_string(&p).unwrap(), format!("fps = 120\ninstall_id = {id}\n"));
+    assert_eq!(
+        fs::read_to_string(&p).unwrap(),
+        format!("fps = 120\ninstall_id = {id}\n")
+    );
     assert_eq!(install::get(&p), (id.clone(), true));
     // not a setting: no variable, not an unknown line, not in the launcher's table
     let ini = dhd_settings::Ini::parse(&fs::read(&p).unwrap());
@@ -270,9 +387,15 @@ fn install_id() {
     let path = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
     let mut out = [0 as std::ffi::c_char; 33];
     unsafe {
-        assert_eq!(dhd_settings::c::dhd_settings_install_id(path.as_ptr(), out.as_mut_ptr(), out.len()), 1);
+        assert_eq!(
+            dhd_settings::c::dhd_settings_install_id(path.as_ptr(), out.as_mut_ptr(), out.len()),
+            1
+        );
         assert_eq!(std::ffi::CStr::from_ptr(out.as_ptr()).to_str().unwrap(), id);
-        assert_eq!(dhd_settings::c::dhd_settings_install_id(path.as_ptr(), out.as_mut_ptr(), 32), 0);
+        assert_eq!(
+            dhd_settings::c::dhd_settings_install_id(path.as_ptr(), out.as_mut_ptr(), 32),
+            0
+        );
     }
     fs::remove_dir_all(dir).unwrap();
 }

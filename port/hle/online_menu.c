@@ -9,6 +9,7 @@
 #include "menu_page.h"
 #include "text_input.h"
 #include "settings_table.h"  /* the rider name's rule (dhd_settings, port/render/settings) */
+#include "lan_history.h"
 #include "../net/net.h"
 #include "../net/lobby_row.h"
 
@@ -67,14 +68,16 @@ static const struct { int index; const char *name; } riders[] = {
 static int arena(int track) { return track == 23; }
 
 static const char code_letters[] = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";  /* the server's join codes */
+static const char lan_letters[] = "0123456789.:";
+static const char pin_letters[] = "0123456789";
 static const char name_letters[] = SETTING_NAME_LETTERS;
 /* CODE_LENGTH: an SFU room's code; a P2P room's has one more (port/net/net.h, finding 180). */
-enum { NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, P2P_CODE_LENGTH = 7, ROW_TEXT = 96, MAX_ROWS = 12, LIST_MAX = 8, MEMBER_ROWS = 10 };
-/* HOME's rows, in this order, those the platform offers (host_service_net_offered: SFU rooms on
-   the desktop, P2P rooms everywhere, finding 180); home_kind[] says what each shown row does. */
-enum { HOME_NAME, HOME_QUICK, HOME_LIST, HOME_PUBLIC, HOME_PRIVATE, HOME_REGION, HOME_P2P, HOME_JOIN, HOME_UPDATE, HOME_KINDS };
+enum { PLAYER_NAME_MAX = SETTING_NAME_MAX, CODE_LENGTH = 6, P2P_CODE_LENGTH = 7, ROW_TEXT = 96, MAX_ROWS = 16, LIST_MAX = 8, MEMBER_ROWS = 10 };
+/* HOME's rows, in this order, those the platform offers; home_kind[] says what each row does. */
+enum { HOME_NAME, HOME_ROOM_NAME, HOME_QUICK, HOME_LIST, HOME_PUBLIC, HOME_PRIVATE, HOME_REGION, HOME_P2P, HOME_JOIN, HOME_LAN_HOST, HOME_LAN_JOIN, HOME_HISTORY, HOME_TAILNET, HOME_UPDATE, HOME_KINDS };
 
-enum { HOME, LIST, NAME, CODE, ROOM, QUICK };
+enum { HOME, LIST, NAME, ROOM_NAME, CODE, LAN_DISCOVERY, LAN_ADDRESS, LAN_PIN, ROOM, QUICK, HISTORY, TAILNET_HOST_ADDRESS, TAILNET_JOIN_ADDRESS, TAILNET_HELP, TAILNET_MENU };
+static char name[PLAYER_NAME_MAX + 1], room_name[PLAYER_NAME_MAX + 1], version[64];
 /* The room's rows */
 /* The room's options, carried in the server's "laps" setting (Downhill Domination has no laps):
    every PC builds the same race from them (online.c hle_online_ai_count, hle_cheat_code). Cheat
@@ -96,8 +99,27 @@ static int shop_done;
 /* connecting: Create or Join was chosen; the page waits for the server's room (connect_poll). */
 static int connecting;
 static int chosen_rider, chosen_bike;
+static NetLanRoom lan_rooms[LIST_MAX];
+static int lan_scan_state, lan_scan_count, lan_scan_shown;
+static double lan_refresh_at;
+static char lan_errors[8][96];
+static unsigned lan_error_next, lan_error_count;
+static LanHistory lan_history;
+static int lan_history_loaded, history_page;
+static char history_text[LAN_HISTORY_TEXT_MAX];
+enum { HISTORY_PAGE_SIZE = 8, LAN_ERROR_COUNT = 8 };
 static int chosen_spot;  /* the chosen rider's place on the rider screen's carousel (D_004C6910), 0 none */
 static int public_room, room_settings_sent, room_ready_sent, room_track = 0, room_options;
+static char pending_lan_address[64], pin_entry[9], tailnet_peer[64];
+static int tailnet_settings_loaded;
+static int pin_return_screen = LAN_DISCOVERY, pin_cursor;
+static NetLanInterface lan_ifaces[16];
+static int lan_iface_count, lan_iface_cursor, lan_ip_open, host_pin_open;
+static char host_pin_entry[9];
+static int host_pin_cursor, host_pin_action;
+static void race_time(char *out, int size, long long ticks);
+static void note(const char *text, const int *colour);
+static void guest_pin_prompt(const char *address, int return_to);
 extern int func_00182290(int track);
 static int track_limit(int track) { int kind = func_00182290(track); return kind == 2 ? 10 : kind == 1 ? 8 : 6; }
 static int rotation_sent;  /* the host's track list for the room's Then rule, once a room */
@@ -358,24 +380,99 @@ static void poll_list(void)
     set_state(&list_state, 2);
 }
 
+static void start_lan_scan(void)
+{
+    memset(lan_rooms, 0, sizeof lan_rooms);
+    lan_scan_count = 0;
+    lan_scan_shown = 0;
+    lan_refresh_at = 0;
+    lan_scan_state = host_service_net_discover_lan_start() ? 1 : -1;
+}
+
+static void poll_lan_scan(void)
+{
+    int r;
+    if (lan_scan_state != 1) return;
+    r = host_service_net_discover_lan_poll(GADDR(lan_rooms), LIST_MAX);
+    if (r == -2) return;
+    lan_scan_count = r < 0 ? 0 : r > LIST_MAX ? LIST_MAX : r;
+    lan_scan_state = r < 0 ? -1 : 2;
+    lan_refresh_at = host_seconds() + 4.0;
+    if (r < 0) {
+        snprintf(lan_errors[lan_error_next], sizeof lan_errors[0], "LAN room discovery failed");
+        lan_error_next = (lan_error_next + 1) % LAN_ERROR_COUNT;
+        if (lan_error_count < LAN_ERROR_COUNT) lan_error_count++;
+    }
+}
+
+static void remember_lan_error(const char *message)
+{
+    if (!message || !*message) return;
+    snprintf(lan_errors[lan_error_next], sizeof lan_errors[0], "%s", message);
+    lan_error_next = (lan_error_next + 1) % LAN_ERROR_COUNT;
+    if (lan_error_count < LAN_ERROR_COUNT) lan_error_count++;
+}
+
+static void copy_lan_report(void)
+{
+    NetLobby l = {0};
+    char report[1200];
+    int n;
+    host_service_net_get_lobby(GADDR(&l));
+    const char *state = l.state == NET_IDLE ? "idle" : l.state == NET_CONNECTING ? "connecting" :
+                        l.state == NET_LOBBY ? "lobby" : l.state == NET_RACING ? "racing" :
+                        l.state == NET_RECONNECTING ? "reconnecting" : "failed";
+    n = snprintf(report, sizeof report,
+                 "Downhill Revived LAN troubleshooting report\nBuild: %s\nLAN state: %s\nRole: %s\nPlayers: %d/%d\n"
+                 "Reconnect attempt: %d\nLink check: %s\nDiscovery: %s\n",
+                 version[0] ? version : "unknown", state, l.is_host ? "host" : "guest", l.nmembers, l.max_players,
+                 l.reconnect_attempt, l.check_valid ? "passed" : l.check_id ? "pending or failed" : "not run",
+                 lan_scan_state == 1 ? "searching" : lan_scan_state < 0 ? "failed" : "complete or idle");
+    size_t used = n < 0 ? 0 : (size_t)n >= sizeof report ? sizeof report - 1 : (size_t)n;
+    for (unsigned i = 0; i < lan_error_count && used + 4 < sizeof report; i++) {
+        unsigned at = (lan_error_next + LAN_ERROR_COUNT - lan_error_count + i) % LAN_ERROR_COUNT;
+        n = snprintf(report + used, sizeof report - used, "Recent LAN error: %.90s\n", lan_errors[at]);
+        if (n < 0 || (size_t)n >= sizeof report - used) break;
+        used += (size_t)n;
+    }
+    if (l.is_lan && l.error[0] && used + 4 < sizeof report)
+        snprintf(report + used, sizeof report - used, "Current LAN error: %.90s\n", l.error);
+    int copied = host_service_clipboard_set(GADDR(report));
+    snprintf(status, sizeof status, "%s", copied ? "LAN troubleshooting report copied" : "Could not copy the LAN report");
+    note(copied ? "REPORT COPIED" : "REPORT COPY FAILED", NULL);
+    hle_log("online menu: LAN troubleshooting report %s\n", copied ? "copied" : "copy failed");
+    menu_play(copied ? "S_SELECT" : "S_CANCEL");
+}
+
 /* ---- the player ---- */
 
-static char name[NAME_MAX + 1], version[64];
 static int rider = 0;  /* index into riders[] */
+
+static void setting_text(char *out, size_t cap, const char *input, const char *fallback)
+{
+    size_t used = 0;
+    for (const char *p = input ? input : ""; *p && used + 1 < cap; p++) {
+        char ch = (char)(*p >= 'a' && *p <= 'z' ? *p - 32 : *p);
+        if (strchr(name_letters, ch)) out[used++] = ch;
+    }
+    out[used] = 0;
+    if (!used) snprintf(out, cap, "%s", fallback);
+}
 
 static void load_player(void)
 {
     const char *n = getenv("DHD_NET_NAME"), *r = getenv("DHD_NET_RIDER");
     if (!name[0]) {
-        int k = 0;
-        for (const char *c = n ? n : ""; *c && k < NAME_MAX; c++) {
-            char up = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
-            if (strchr(name_letters, up)) name[k++] = up;
-        }
-        name[k] = 0;
-        if (!k) snprintf(name, sizeof name, "%s", SETTING_NAME_UNNAMED);
+        setting_text(name, sizeof name, n, SETTING_NAME_UNNAMED);
         for (int i = 0; r && *r && i < COUNT(riders); i++)
             if (riders[i].index == atoi(r)) rider = i;
+    }
+    if (!room_name[0]) {
+        char saved[PLAYER_NAME_MAX + 1] = "";
+        const char *configured = getenv("DHD_NET_ROOM_NAME");
+        if (!configured && host_service_host_setting_read(GADDR("room_name"), GADDR(saved), sizeof saved))
+            configured = saved;
+        setting_text(room_name, sizeof room_name, configured, "LAN ROOM");
     }
     if (!version[0]) hle_online_version(version, sizeof version);
 }
@@ -386,6 +483,49 @@ static void save(const char *key, const char *env, const char *value)
     host_service_host_setting_save(GADDR(key), GADDR(value));
     host_putenv_s(env, value);
     hle_env_changed();
+}
+
+static void tailnet_settings_load(void)
+{
+    if (tailnet_settings_loaded) return;
+    tailnet_settings_loaded = 1;
+    tailnet_peer[0] = 0;
+    host_service_host_setting_read(GADDR("tailnet_peer"), GADDR(tailnet_peer), sizeof tailnet_peer);
+    tailnet_peer[sizeof tailnet_peer - 1] = 0;
+}
+
+static void history_load(void)
+{
+    if (lan_history_loaded) return;
+    lan_history_loaded = 1;
+    memset(&lan_history, 0, sizeof lan_history);
+    memset(history_text, 0, sizeof history_text);
+    if (host_service_host_setting_read(GADDR("lan_history"), GADDR(history_text), sizeof history_text) &&
+        !lan_history_parse(history_text, &lan_history))
+        hle_log("online menu: ignoring invalid local LAN history\n");
+}
+
+static void history_save(void)
+{
+    if (!lan_history_format(&lan_history, history_text, sizeof history_text) ||
+        !host_service_host_setting_save(GADDR("lan_history"), GADDR(history_text)))
+        hle_log("online menu: could not save local LAN history\n");
+}
+
+static void record_lan_result(const NetLobby *l)
+{
+    int track_index = -1;
+    const NetResult *own = NULL;
+    if (!l || !l->is_lan || l->is_tailnet || l->last_race_id <= 0 || !l->lan_room_id[0]) return;
+    history_load();
+    for (int i = 0; i < TRACK_COUNT; i++)
+        if (track_at(i) == l->last_race_track) { track_index = i; break; }
+    for (int i = 0; i < l->nresults && i < NET_MAX_SLOTS; i++)
+        if (l->result[i].id == l->member_id) { own = &l->result[i]; break; }
+    if (track_index < 0 || !own) return;
+    if (lan_history_record(&lan_history, l->lan_room_id, (uint32_t)l->last_race_id,
+                           track_index, own->place, own->ticks))
+        history_save();
 }
 
 /* Where the rooms this player creates run (dhd.ini room_region, DHD_NET_ROOM_REGION; finding 181):
@@ -420,15 +560,20 @@ static void region_step(MenuPage *p, int by)
 }
 
 /* What stops this PC from joining a race, or NULL. */
-static const char *not_ready(void)
+static const char *not_ready_local(void)
 {
     const char *render = getenv("DHD_RENDER");
-    if (!server()) return "No server: set server = ... in dhd.ini";
     if (!render || strcmp(render, "native")) return "Online races need the native renderer";
     if (iso_state == 1) return "Checking the disc image, a moment...";
     if (iso_state != 2) return "Can't read the disc image: choose it again";
     if (strcmp(iso_hash, us_files_sha256)) return "This disc's game files aren't the USA disc's";
     return NULL;
+}
+
+static const char *not_ready(void)
+{
+    if (!server()) return "No server: set server = ... in dhd.ini";
+    return not_ready_local();
 }
 
 /* Why the disc image keeps this PC offline, as lines under ONLINE's rows (the footer holds one
@@ -450,7 +595,7 @@ static const char *const *disc_note(void)
 /* ---- the screens ---- */
 
 static int entry_pick;           /* the letter on offer */
-static char entry[16];
+static char entry[32];
 static int home_row;  /* HOME's row last chosen: the cursor goes back to it */
 
 static int home_kind[HOME_KINDS], home_rows;
@@ -481,11 +626,36 @@ static void go(int to)
 {
     host_service_text_input_end();
     screen = to;
-    if (to == NAME || to == CODE) host_service_text_input_begin();
+    if (to == NAME || to == ROOM_NAME || to == CODE || to == LAN_ADDRESS || to == LAN_PIN ||
+        to == TAILNET_HOST_ADDRESS || to == TAILNET_JOIN_ADDRESS) host_service_text_input_begin();
     page.mouse = NULL, page.draw = NULL, page.title_y = 0;
     if (to == ROOM) room_open();
     status[0] = 0;
     menu_page_rebuild_at(&page, to == HOME ? home_row : 0);
+}
+
+static void guest_pin_prompt(const char *address, int return_to)
+{
+    snprintf(pending_lan_address, sizeof pending_lan_address, "%s", address ? address : "");
+    pin_return_screen = return_to == LAN_PIN ? LAN_DISCOVERY : return_to;
+    pin_entry[0] = 0;
+    pin_cursor = 0;
+    go(LAN_PIN);
+}
+
+static int lan_manual_row(void)
+{
+    return lan_scan_state == 1 ? 1 : lan_scan_count;
+}
+
+static int lan_report_row(void)
+{
+    return lan_manual_row() + 1;
+}
+
+static int lan_search_row(void)
+{
+    return lan_report_row() + 1;
 }
 
 static void start_list(void)
@@ -548,6 +718,68 @@ static void enter_room(int create, const char *code)
             create == HOME_P2P ? "(P2P)" : create ? (public_room ? "(public)" : "(private)") : net_log_code(code).text);
 }
 
+static void enter_lan_room(int host, const char *address, const char *pin)
+{
+    const char *why = not_ready_local();
+    int result;
+    if (why) {
+        snprintf(status, sizeof status, "%s", why);
+        hle_log("online menu: can't %s LAN room: %s\n", host ? "host" : "join", why);
+        return;
+    }
+    host_service_net_init(GADDR(server()), GADDR(name), GADDR(version), GADDR(iso_hash));
+    result = host ? host_service_net_host_lan() : host_service_net_join_lan_pin(GADDR(address), GADDR(pin ? pin : ""));
+    if (result < 0) {
+        NetLobby failed;
+        host_service_net_get_lobby(GADDR(&failed));
+        snprintf(status, sizeof status, "%s", failed.error[0] ? failed.error :
+                 host ? "Could not start the LAN room." : "Enter the host's private IPv4 address and port.");
+        remember_lan_error(status);
+        hle_log("online menu: can't %s LAN room: %s\n", host ? "host" : "join", status);
+        return;
+    }
+    reset_selection();
+    choosing = 0;
+    public_room = 0;
+    p2p_noticed = 0;
+    room_settings_sent = rotation_sent = host ? 0 : 1;
+    room_ready_sent = 0;
+    connecting = 1;
+    snprintf(status, sizeof status, "%s", host ? "Starting a LAN room..." : "Joining the LAN room...");
+    hle_log("online menu: %s a LAN room\n", host ? "hosting" : "joining");
+}
+
+static void enter_tailnet_room(int host, const char *address, const char *pin)
+{
+    const char *why = not_ready_local();
+    int result;
+    if (why) {
+        snprintf(status, sizeof status, "%s", why);
+        hle_log("online menu: can't %s Tailnet room: %s\n", host ? "host" : "join", why);
+        return;
+    }
+    host_service_net_init(GADDR(server()), GADDR(name), GADDR(version), GADDR(iso_hash));
+    result = host ? host_service_net_host_tailnet(GADDR(address))
+                  : host_service_net_join_tailnet_pin(GADDR(address), GADDR(pin ? pin : ""));
+    if (result < 0) {
+        NetLobby failed;
+        host_service_net_get_lobby(GADDR(&failed));
+        snprintf(status, sizeof status, "%s", failed.error[0] ? failed.error :
+                 host ? "Enter this device's Tailscale IPv4 address." : "Enter the host's Tailscale IPv4 address and port.");
+        hle_log("online menu: can't %s Tailnet room: %s\n", host ? "host" : "join", status);
+        return;
+    }
+    reset_selection();
+    choosing = 0;
+    public_room = 0;
+    p2p_noticed = 0;
+    room_settings_sent = rotation_sent = host ? 0 : 1;
+    room_ready_sent = 0;
+    connecting = 1;
+    snprintf(status, sizeof status, "%s", host ? "Starting a Tailscale room..." : "Joining the Tailscale room...");
+    hle_log("online menu: %s a Tailnet room\n", host ? "hosting" : "joining");
+}
+
 static void page_build(MenuPage *p)
 {
     switch (screen) {
@@ -556,6 +788,8 @@ static void page_build(MenuPage *p)
         home_rows = 0;
         snprintf(text[0], ROW_TEXT, "Name:  %s", name);
         home_add(p, HOME_NAME, text[0]);
+        snprintf(text[1], ROW_TEXT, "Room Name:  %s", room_name);
+        home_add(p, HOME_ROOM_NAME, text[1]);
         if (host_service_net_offered() & NET_OFFER_SFU) {
             home_add(p, HOME_QUICK, "Quick Race");
             home_add(p, HOME_LIST, "Public Races");
@@ -568,6 +802,15 @@ static void page_build(MenuPage *p)
         }
         if (host_service_net_offered() & NET_OFFER_P2P) home_add(p, HOME_P2P, "Create A P2P Race");
         home_add(p, HOME_JOIN, "Join With A Code");
+        if (host_service_net_offered() & NET_OFFER_LAN) {
+            home_add(p, HOME_LAN_HOST, "Host A LAN Race");
+            home_add(p, HOME_LAN_JOIN, "Find LAN Races");
+            home_add(p, HOME_HISTORY, "LAN Results History");
+        }
+        if (host_service_net_offered() & NET_OFFER_TAILNET) {
+            tailnet_settings_load();
+            home_add(p, HOME_TAILNET, "Tailscale Remote Play");
+        }
         if (outdated) home_add(p, HOME_UPDATE, "Update Now");
         disc_shown = disc_note();
         for (const char *const *line = disc_shown; line && *line; line++) menu_page_text(p, *line);
@@ -584,6 +827,26 @@ static void page_build(MenuPage *p)
         }
         menu_page_row(p, "Look Again", list_state == 2);
         break;
+    case LAN_DISCOVERY:
+        p->title = "LAN RACES";
+        if (lan_scan_state == 1) menu_page_row(p, "Searching this Wi-Fi network...", 0);
+        else if (lan_scan_state < 0) menu_page_text(p, "Room discovery unavailable. Enter the address manually.");
+        else if (!lan_scan_count) menu_page_text(p, "No open rooms found on this Wi-Fi network.");
+        for (int i = 0; lan_scan_state == 2 && i < lan_scan_count; i++) {
+            const char *track = "?";
+            for (int k = 0; k < TRACK_COUNT; k++)
+                if (track_at(k) == lan_rooms[i].track) track = track_name(track_at(k));
+            int open = lan_rooms[i].max_players - lan_rooms[i].players;
+            snprintf(text[i], ROW_TEXT, "%.10s  %d/%d  %d OPEN  %dMS  %s%s",
+                     lan_rooms[i].room_name[0] ? lan_rooms[i].room_name : lan_rooms[i].address,
+                     lan_rooms[i].players, lan_rooms[i].max_players, open > 0 ? open : 0,
+                     lan_rooms[i].rtt_ms, track, lan_rooms[i].pin_required ? "  PIN" : "");
+            menu_page_row(p, text[i], 1);
+        }
+        menu_page_row(p, "Enter address manually", 1);
+        menu_page_row(p, "Copy LAN troubleshooting report", 1);
+        menu_page_row(p, "Search again", lan_scan_state != 1);
+        break;
     case QUICK:  /* the busiest public race with room, joined; none: asked before one is made */
         p->title = "QUICK RACE";
         list_shown = list_state == 2;
@@ -595,39 +858,108 @@ static void page_build(MenuPage *p)
         }
         break;
     case NAME:
+    case ROOM_NAME:
     case CODE:
-        p->title = screen == NAME ? "YOUR NAME" : "JOIN WITH A CODE";
+    case LAN_ADDRESS:
+    case TAILNET_HOST_ADDRESS:
+    case TAILNET_JOIN_ADDRESS:
+        p->title = screen == NAME ? "YOUR NAME" : screen == ROOM_NAME ? "ROOM NAME" : screen == CODE ? "JOIN WITH A CODE"
+                  : screen == LAN_ADDRESS ? "JOIN A LAN RACE" : screen == TAILNET_HOST_ADDRESS ? "TAILSCALE HOST IP" : "JOIN TAILSCALE";
         menu_page_row(p, text[0], 1);  /* written every frame */
-        menu_page_row(p, screen == NAME ? "Done" : "Join", 1);
+        menu_page_row(p, screen == NAME || screen == ROOM_NAME ? "Done" : screen == TAILNET_HOST_ADDRESS ? "Host room" : "Join", 1);
+        if (screen == TAILNET_HOST_ADDRESS) {
+            menu_page_text(p, "Enter this device's Tailscale IPv4 address (100.x). The game picks the port.");
+        } else if (screen == TAILNET_JOIN_ADDRESS)
+            menu_page_text(p, "Enter the host's Tailscale IPv4:port exactly as shown in their room.");
+        break;
+    case LAN_PIN:
+        p->title = pin_return_screen == TAILNET_JOIN_ADDRESS ? "TAILSCALE ROOM PIN" : "LAN ROOM PIN";
+        snprintf(text[0], ROW_TEXT, "PIN: %s", pin_entry[0] ? pin_entry : "(optional)");
+        menu_page_row(p, text[0], 1);
+        menu_page_row(p, "Join room", 1);
+        menu_page_row(p, "Back", 1);
+        menu_page_text(p, "Leave blank for an open room; protected rooms use 4-8 digits.");
+        break;
+    case TAILNET_HELP:
+        p->title = "TAILSCALE SETUP";
+        menu_page_text(p, "Install and connect Tailscale on both devices first.");
+        menu_page_text(p, "No automatic Tailscale peer discovery: exchange addresses privately.");
+        menu_page_text(p, "Host enters their own 100.x IPv4; guest enters host 100.x IPv4:port.");
+        menu_page_text(p, "Allow this game through Android VPN or split-tunnel settings.");
+        menu_page_text(p, "Custom Tailnet ACLs must allow the room's TCP port; it may change each room.");
+        menu_page_text(p, "A room PIN is optional; share it separately with trusted players.");
+        menu_page_row(p, "Back", 1);
+        break;
+    case TAILNET_MENU:
+        p->title = "TAILSCALE REMOTE PLAY";
+        menu_page_row(p, "Host a Tailscale room", 1);
+        menu_page_row(p, "Join a Tailscale room", 1);
+        menu_page_row(p, "Setup help", 1);
+        menu_page_row(p, "Back", 1);
         break;
     case ROOM:  /* no rows: it lays itself out (room_draw) */
         p->title = "RACE ROOM";
         break;
+    case HISTORY: {
+        int first = history_page * HISTORY_PAGE_SIZE;
+        p->title = "LAN RESULTS HISTORY";
+        for (int i = first; i < first + HISTORY_PAGE_SIZE && i < TRACK_COUNT; i++) {
+            char best[24], line[ROW_TEXT], counts[LAN_HISTORY_PLACES + 1][4];
+            const LanHistoryTrack *stats = &lan_history.track[i];
+            if (stats->best_ticks) race_time(best, sizeof best, (long long)stats->best_ticks);
+            else snprintf(best, sizeof best, "--:--.--");
+            if (stats->races > 99) memcpy(counts[0], "99+", 4);
+            else snprintf(counts[0], sizeof counts[0], "%u", stats->races);
+            for (int place = 0; place < LAN_HISTORY_PLACES; place++) {
+                if (stats->place[place] > 99) memcpy(counts[place + 1], "99+", 4);
+                else snprintf(counts[place + 1], sizeof counts[place + 1], "%u", stats->place[place]);
+            }
+            snprintf(line, sizeof line,
+                     "%.8s R%s P1:%s P2:%s P3:%s P4:%s P5:%s P6:%s P7:%s P8:%s P9:%s P10:%s B%s",
+                     track_name(track_at(i)), counts[0], counts[1], counts[2], counts[3], counts[4],
+                     counts[5], counts[6], counts[7], counts[8], counts[9], counts[10], best);
+            menu_page_row(p, line, 0);
+        }
+        if (history_page > 0) menu_page_row(p, "Previous Page", 1);
+        if ((history_page + 1) * HISTORY_PAGE_SIZE < TRACK_COUNT) menu_page_row(p, "Next Page", 1);
+        menu_page_row(p, "Back", 1);
+        break;
+    }
     }
 }
 
 static void entry_text(void)
 {
-    const char *letters = screen == NAME ? name_letters : code_letters;
-    int max = screen == NAME ? NAME_MAX : P2P_CODE_LENGTH;
+    const char *letters = screen == NAME || screen == ROOM_NAME ? name_letters : screen == CODE ? code_letters : lan_letters;
+    int max = screen == NAME || screen == ROOM_NAME ? PLAYER_NAME_MAX : screen == CODE ? P2P_CODE_LENGTH : 21;
     char shown = letters[entry_pick] == ' ' ? '-' : letters[entry_pick];
     if ((int)strlen(entry) < max)
-        snprintf(text[0], ROW_TEXT, "%s  %s[%c]", screen == NAME ? "Name:" : "Code:", entry, shown);
+        snprintf(text[0], ROW_TEXT, "%s  %s[%c]", screen == NAME ? "Name:" : screen == ROOM_NAME ? "Room:" : screen == CODE ? "Code:" : screen == TAILNET_HOST_ADDRESS ? "My Tailscale IP:" : screen == TAILNET_JOIN_ADDRESS ? "Host IP:port:" : "Address:", entry, shown);
     else
-        snprintf(text[0], ROW_TEXT, "%s  %s", screen == NAME ? "Name:" : "Code:", entry);
+        snprintf(text[0], ROW_TEXT, "%s  %s", screen == NAME ? "Name:" : screen == ROOM_NAME ? "Room:" : screen == CODE ? "Code:" : screen == TAILNET_HOST_ADDRESS ? "My Tailscale IP:" : screen == TAILNET_JOIN_ADDRESS ? "Host IP:port:" : "Address:", entry);
 }
 
 /* The server refused or lost the room: its reason for the footer. */
 static void refused(const NetLobby *l)
 {
     int too_old = !strcmp(l->error_code, "client_outdated");
+    int needs_pin = l->is_lan && !strcmp(l->error_code, "pin_required");
+    int host_lost = l->is_lan && !strcmp(l->error_code, "room_not_found");
+    char retry_address[64];
+    snprintf(retry_address, sizeof retry_address, "%s", l->lan_address);
     if (too_old) outdated = 1;
-    snprintf(status, sizeof status, "%s",
-             too_old ? outdated_text : l->error[0] ? l->error : "The connection to the server failed");
+    snprintf(status, sizeof status, "%s", too_old ? outdated_text : host_lost ?
+             (l->is_tailnet ? "The Tailscale host left. Start a new room." : "The LAN host left. This room cannot migrate; start a new room.") :
+             l->error[0] ? l->error : "The connection to the server failed");
+    if (l->is_lan && !l->is_tailnet) remember_lan_error(l->error[0] ? l->error : status);
     hle_log("online menu: refused: %s (%s)\n", l->error, l->error_code);
     host_service_net_leave();
     reset_selection();
     connecting = 0;
+    if (needs_pin && retry_address[0]) {
+        guest_pin_prompt(retry_address, screen);
+        snprintf(status, sizeof status, "This room requires a PIN. Enter it to try again.");
+    }
     if (too_old) home_row = home_row_of(HOME_UPDATE);
 }
 
@@ -635,13 +967,13 @@ static void refused(const NetLobby *l)
 static void room_sync(const NetLobby *l)
 {
     if (l->is_host && !room_settings_sent) {
-        char room_name[40];
-        snprintf(room_name, sizeof room_name, "%s", name);
+        char room_title[40];
+        snprintf(room_title, sizeof room_title, "%s", room_name);
         /* tests (DHD_NET_SCRIPTED with DHD_NET_TEST_TRACK=<game track index>): the room starts there */
         const char *test_track = getenv("DHD_NET_SCRIPTED") ? getenv("DHD_NET_TEST_TRACK") : NULL;
         for (int k = 0; test_track && k < TRACK_COUNT; k++)
             if (track_at(k) == atoi(test_track)) room_track = k;
-        NetRoomSettings s = {track_at(room_track), room_options, public_room, 10, -1, room_name};
+        NetRoomSettings s = {track_at(room_track), room_options, public_room, 10, -1, room_title};
         host_service_net_set_room(GADDR(&s));
         room_settings_sent = 1;
     }
@@ -697,6 +1029,7 @@ static void connect_poll(MenuPage *p)
 
 static void page_accept(MenuPage *p, int row);
 static void page_step(MenuPage *p, int row, int by);
+static void page_back(MenuPage *p);
 
 /* Over the rider screen the room closes (port_online_shell takes the rider screen's Back to
    the title and opens ONLINE there); over the title it is ONLINE's own page. */
@@ -727,7 +1060,7 @@ static void leave_room(MenuPage *p)
    more players may ride the same rider (issue #17). */
 
 enum { RF_TRACK, RF_BOTS, RF_CHEATS, RF_PUBLIC, RF_RULES, RF_RIDER, RF_READY, RF_START, RF_LEAVE, RF_COUNT };
-enum { RULE_WINDOW, RULE_NEXT, RULE_THEN, RULE_PLAYERS, RULES };
+enum { RULE_WINDOW, RULE_NEXT, RULE_THEN, RULE_PLAYERS, RULE_PIN, RULE_IP, RULE_REPORT, RULES };
 /* The picker fills its columns top to bottom, so the list reads down the left column, then the
    right (finding 190): Up / Down step through the list, Left / Right go to the other column. */
 enum { TOASTS = 3, TRACK_COLUMNS = 2, TRACK_ROWS = (TRACK_COUNT + TRACK_COLUMNS - 1) / TRACK_COLUMNS };
@@ -742,8 +1075,13 @@ static NetLobby room;                       /* this frame's snapshot */
 static int rf = RF_READY, rf_bar = RF_READY;  /* the cursor; the bar's place, kept meanwhile */
 static int track_list, track_cursor;          /* all the tracks, open over the room */
 static int leave_ask, leave_choice;           /* "Leave the room?": 0 Stay, 1 Leave */
+static int kick_ask, kick_choice, kick_member_id;
+static char kick_member_name[32];
 static int rules_open, rules_cursor;          /* ROOM RULES, open over the room */
 static Hit hits[RF_COUNT], code_hit, track_hits[TRACK_COUNT], track_back, leave_hits[2], rule_hits[RULES], rules_back;
+static Hit member_hits[NET_MAX_SLOTS], kick_hits[2];
+static Hit lan_ip_hits[16], lan_ip_refresh_hit, lan_ip_back_hit;
+static Hit host_pin_set_hit, host_pin_remove_hit, host_pin_delete_hit, host_pin_cancel_hit, host_pin_digit_hits[10];
 static int room_buttons, repeat_buttons, repeat_frames;
 static double copied_at;
 static int copied_ok;
@@ -805,7 +1143,7 @@ static RoomNow room_now(void)
         if (r.racing) r.own_race = m->race_state;
     }
     /* the host starts the next race with whoever is ready (the others wait here) */
-    r.can_start = r.host && !r.racing && !r.starting && r.ready > 0;
+    r.can_start = r.host && !r.racing && !r.starting && r.ready > 0 && (!l->is_lan || l->nmembers == 1 || l->check_valid);
     return r;
 }
 
@@ -813,7 +1151,7 @@ static int focusable(int f, const RoomNow *r)
 {
     switch (f) {
     case RF_TRACK: case RF_BOTS: case RF_CHEATS: return r->host && r->in;
-    case RF_PUBLIC: return r->host && r->in && !room.is_p2p;  /* a P2P room is never listed */
+    case RF_PUBLIC: return r->host && r->in && (room.is_lan || !room.is_p2p);  /* LAN row runs a link check */
     case RF_RULES: return r->in;  /* everyone reads them; the host changes them */
     case RF_RIDER: return r->in;
     case RF_READY: return r->in && strcmp(r->own_race, "racing") != 0;
@@ -828,9 +1166,153 @@ static const int windows[] = {30, 60, 120, 0};
 static const char *window_name(int s) { return s == 30 ? "30 S" : s == 60 ? "60 S" : s == 120 ? "2 MIN" : "NO LIMIT"; }
 static const char *next_name(int n) { return n ? "HOST STARTS" : "AUTO 30 S"; }
 static const char *then_name(int t) { return t == 0 ? "SAME TRACK" : t == 2 ? "RANDOM TRACK" : "NEXT TRACK"; }
+static void note(const char *text, const int *colour);
+
+static int kick_target_index(void)
+{
+    for (int i = 0; i < room.nmembers; i++)
+        if (room.member[i].id == kick_member_id) return i;
+    return -1;
+}
+
+static void request_kick(int i)
+{
+    if (!room.is_host || !(room.is_lan || room.is_tailnet) || i < 0 || i >= room.nmembers ||
+        room.member[i].id == room.member_id || room.member[i].id == room.host_id) return;
+    kick_member_id = room.member[i].id;
+    snprintf(kick_member_name, sizeof kick_member_name, "%.31s", room.member[i].name);
+    kick_choice = 0;  /* cancel is selected by default */
+    kick_ask = 1;
+    menu_play("S_SELECT");
+}
+
+static void confirm_kick(void)
+{
+    int target = kick_target_index();
+    if (room.is_host && (room.is_lan || room.is_tailnet) && target >= 0 &&
+        room.member[target].id != room.member_id && room.member[target].id != room.host_id) {
+        host_service_net_kick(kick_member_id);
+        hle_log("online menu: host removed member %d (%s)\n", kick_member_id, kick_member_name);
+        note("PLAYER REMOVED", green);
+    } else {
+        note("PLAYER ALREADY LEFT", amber);
+    }
+    kick_ask = 0;
+    menu_play("S_SELECT");
+}
+
+static int room_rule_count(void) { return room.is_lan ? RULES : RULE_PLAYERS + 1; }
+
+static void close_host_pin(void)
+{
+    if (!host_pin_open) return;
+    host_service_text_input_end();
+    host_pin_open = 0;
+}
+
+static void submit_host_pin(int remove)
+{
+    size_t n = strlen(host_pin_entry);
+    if (!room.is_host || !(room.is_lan || room.is_tailnet)) {
+        close_host_pin();
+        snprintf(status, sizeof status, "Only the room host can change its PIN.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    if (!remove && !n) {
+        snprintf(status, sizeof status, "Enter 4-8 digits, or choose Remove PIN.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    if (!remove && (n < 4 || n > 8)) {
+        snprintf(status, sizeof status, "A room PIN must be 4-8 digits; leave it blank to remove it.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    if (!host_service_net_set_lan_pin(GADDR(remove ? "" : host_pin_entry))) {
+        snprintf(status, sizeof status, "Could not change the room PIN right now.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    close_host_pin();
+    status[0] = 0;
+    note(remove ? "ROOM PIN REMOVED" : "ROOM PIN SET", green);
+    menu_play("S_SELECT");
+}
+
+static int read_lan_interfaces(void)
+{
+    int n = host_service_net_lan_interfaces(GADDR(lan_ifaces), 16);
+    lan_iface_count = n < 0 ? 0 : n > 16 ? 16 : n;
+    return lan_iface_count;
+}
+
+static void open_lan_ip_settings(void)
+{
+    int available = host_service_net_lan_refresh_address();
+    host_service_net_get_lobby(GADDR(&room));
+    read_lan_interfaces();
+    lan_iface_cursor = 0;
+    for (int i = 0; i < lan_iface_count; i++)
+        if (lan_ifaces[i].selected) lan_iface_cursor = i;
+    lan_ip_open = 1;
+    if (available) status[0] = 0;
+    else snprintf(status, sizeof status, "No active private local address is available.");
+    menu_play("S_SELECT");
+}
+
+static void refresh_lan_host_address(void)
+{
+    if (!room.is_host || !room.is_lan || room.is_tailnet) {
+        lan_ip_open = 0;
+        snprintf(status, sizeof status, "Only a Wi-Fi LAN host can refresh this address.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    if (!host_service_net_lan_refresh_address()) {
+        host_service_net_get_lobby(GADDR(&room));
+        read_lan_interfaces();
+        snprintf(status, sizeof status, "No active private local address is available.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    host_service_net_get_lobby(GADDR(&room));
+    read_lan_interfaces();
+    for (int i = 0; i < lan_iface_count; i++)
+        if (lan_ifaces[i].selected) lan_iface_cursor = i;
+    snprintf(status, sizeof status, "HOST ADDRESS REFRESHED: %.40s", room.lan_address);
+    menu_play("S_SELECT");
+}
+
+static void select_lan_host_interface(int i)
+{
+    if (!room.is_host || !room.is_lan || room.is_tailnet) {
+        lan_ip_open = 0;
+        snprintf(status, sizeof status, "Only a Wi-Fi LAN host can select this address.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    if (i < 0 || i >= lan_iface_count) return;
+    if (!host_service_net_lan_select_ip(GADDR(lan_ifaces[i].address))) {
+        snprintf(status, sizeof status, "That address is no longer assigned to this device.");
+        menu_play("S_CANCEL");
+        return;
+    }
+    lan_iface_cursor = i;
+    host_service_net_get_lobby(GADDR(&room));
+    read_lan_interfaces();
+    snprintf(status, sizeof status, "HOST ADDRESS SET: %.40s", room.lan_address);
+    menu_play("S_SELECT");
+}
 
 static void change_rule(int rule, int by)
 {
+    if (rule == RULE_REPORT) {
+        copy_lan_report();
+        return;
+    }
+    if (room.is_lan && rule == RULE_NEXT)
+        return;  /* LAN races are always started manually by the host */
     if (rule == RULE_PLAYERS) {
         int size = room.max_players + by;
         if (size < 2) size = 10;
@@ -838,6 +1320,24 @@ static void change_rule(int rule, int by)
         NetRoomSettings s = {-1, -1, -1, size, -1, NULL};
         host_service_net_set_room(GADDR(&s));
         menu_page_sound(by > 0);
+        return;
+    }
+    if (rule == RULE_PIN) {
+        if (room.is_lan && room.is_host) {
+            rules_open = 0;
+            host_pin_entry[0] = 0;  /* PIN verifiers are one-way; replacing or blank removes it */
+            host_pin_cursor = 0;
+            host_pin_action = 0;
+            host_pin_open = 1;
+            host_service_text_input_begin();
+        }
+        return;
+    }
+    if (rule == RULE_IP) {
+        if (room.is_lan && room.is_host && !room.is_tailnet) {
+            rules_open = 0;
+            open_lan_ip_settings();
+        }
         return;
     }
     const NetLobby *l = &room;
@@ -895,6 +1395,8 @@ static void send_settings(int track, int options, int is_public)
     host_service_net_set_room(GADDR(&s));
 }
 
+static void note(const char *text, const int *colour);
+
 static void change_setting(int f, int by)
 {
     if (f == RF_TRACK) {
@@ -905,8 +1407,13 @@ static void change_setting(int f, int by)
     else if (f == RF_CHEATS) {
         send_settings(-1, room_options = room.laps ^ ROOM_CHEATS, -1);
         hle_log("online menu: the room's cheats %s\n", room_options & ROOM_CHEATS ? "on" : "off");
-    } else if (f == RF_PUBLIC)
-        send_settings(-1, -1, public_room = !room.is_public);
+    } else if (f == RF_PUBLIC) {
+        if (room.is_lan) {
+            host_service_net_lan_check();
+            note("LAN CHECK STARTED", blue);
+        } else
+            send_settings(-1, -1, public_room = !room.is_public);
+    }
     menu_page_sound(by > 0);
 }
 
@@ -933,7 +1440,8 @@ static void toggle_ready(const RoomNow *r)
 
 static void copy_code(void)
 {
-    copied_ok = room.code[0] && host_service_clipboard_set(GADDR(room.code));
+    const char *invite = room.is_lan ? room.lan_address : room.code;
+    copied_ok = invite[0] && host_service_clipboard_set(GADDR(invite));
     copied_at = host_seconds();
     menu_play(copied_ok ? "S_SELECT" : "S_CANCEL");
 }
@@ -1021,6 +1529,39 @@ static void room_input(MenuPage *p, const RoomNow *r)
         repeat_buttons = dirs, repeat_frames = 0;
     if (!p->armed) return;
     int dx = pressed & PAD_LEFT ? -1 : pressed & PAD_RIGHT ? 1 : 0, dy = pressed & PAD_UP ? -1 : pressed & PAD_DOWN ? 1 : 0;
+    if (host_pin_open) {
+        if (dx) host_pin_cursor = (host_pin_cursor + dx + 10) % 10, menu_page_sound(dx > 0);
+        if (dy) host_pin_action ^= 1, menu_page_sound(dy > 0);
+        if (pressed & PAD_SQUARE) {
+            size_t n = strlen(host_pin_entry);
+            if (n < 8) host_pin_entry[n] = pin_letters[host_pin_cursor], host_pin_entry[n + 1] = 0;
+        } else if (pressed & PAD_CIRCLE) {
+            size_t n = strlen(host_pin_entry);
+            if (n) host_pin_entry[n - 1] = 0;
+        }
+        if (pressed & PAD_CROSS) submit_host_pin(host_pin_action);
+        else if (pressed & PAD_TRIANGLE) close_host_pin(), menu_play("S_BACK");
+        return;
+    }
+    if (lan_ip_open) {
+        if (dy && lan_iface_count > 0) {
+            lan_iface_cursor = (lan_iface_cursor + dy + lan_iface_count) % lan_iface_count;
+            menu_page_sound(dy > 0);
+        }
+        if (pressed & PAD_CROSS) select_lan_host_interface(lan_iface_cursor);
+        else if (pressed & PAD_CIRCLE) refresh_lan_host_address();
+        else if (pressed & PAD_TRIANGLE) lan_ip_open = 0, status[0] = 0, menu_play("S_BACK");
+        return;
+    }
+    if (kick_ask) {
+        if (dy) kick_choice ^= 1, menu_page_sound(dy > 0);
+        if (pressed & PAD_CROSS) {
+            if (kick_choice) confirm_kick();
+            else kick_ask = 0, menu_play("S_BACK");
+        } else if (pressed & PAD_TRIANGLE)
+            kick_ask = 0, menu_play("S_BACK");
+        return;
+    }
     if (leave_ask) {
         if (dy) leave_choice ^= 1, menu_page_sound(dy > 0);
         if (pressed & PAD_CROSS) {
@@ -1032,9 +1573,12 @@ static void room_input(MenuPage *p, const RoomNow *r)
     }
     if (rules_open) {
         int to = rules_cursor + dy;
-        if (dy && to >= 0 && to <= RULE_PLAYERS) rules_cursor = to, menu_page_sound(dy > 0);
-        if (dx && r->host) change_rule(rules_cursor, dx);
-        if (pressed & (PAD_CROSS | PAD_TRIANGLE)) rules_open = 0, menu_play("S_BACK");
+        if (dy && to >= 0 && to < room_rule_count()) rules_cursor = to, menu_page_sound(dy > 0);
+        if (dx && (r->host || rules_cursor == RULE_REPORT) && (rules_cursor != RULE_IP || !room.is_tailnet)) change_rule(rules_cursor, dx);
+        if (pressed & PAD_CROSS) {
+            if (rules_cursor == RULE_REPORT || (r->host && rules_cursor == RULE_PIN) || (r->host && rules_cursor == RULE_IP && !room.is_tailnet)) change_rule(rules_cursor, 1);
+            else rules_open = 0, menu_play("S_BACK");
+        } else if (pressed & PAD_TRIANGLE) rules_open = 0, menu_play("S_BACK");
         return;
     }
     if (track_list) {
@@ -1061,6 +1605,42 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
 {
     RoomNow r = room_now();
     if (!p->armed) return;
+    if (kick_ask) {
+        for (int i = 0; i < 2; i++) if (inside(&kick_hits[i], x, y)) {
+            if (moved && kick_choice != i) kick_choice = i, menu_page_sound(i);
+            if (left) {
+                if (i) confirm_kick();
+                else kick_ask = 0, menu_play("S_BACK");
+            }
+        }
+        return;
+    }
+    if (host_pin_open) {
+        for (int i = 0; left && i < 10; i++)
+            if (inside(&host_pin_digit_hits[i], x, y)) {
+                host_pin_cursor = i;
+                size_t n = strlen(host_pin_entry);
+                if (n < 8) host_pin_entry[n] = pin_letters[i], host_pin_entry[n + 1] = 0;
+                return;
+            }
+        if (left && inside(&host_pin_set_hit, x, y)) submit_host_pin(0);
+        else if (left && inside(&host_pin_remove_hit, x, y)) submit_host_pin(1);
+        else if (left && inside(&host_pin_delete_hit, x, y)) {
+            size_t n = strlen(host_pin_entry);
+            if (n) host_pin_entry[n - 1] = 0;
+        }
+        else if (left && inside(&host_pin_cancel_hit, x, y)) close_host_pin(), menu_play("S_BACK");
+        return;
+    }
+    if (lan_ip_open) {
+        for (int i = 0; left && i < lan_iface_count && i < 16; i++)
+            if (inside(&lan_ip_hits[i], x, y)) { lan_iface_cursor = i; select_lan_host_interface(i); return; }
+        if (left && inside(&lan_ip_refresh_hit, x, y)) { refresh_lan_host_address(); return; }
+        if (left && inside(&lan_ip_back_hit, x, y)) { lan_ip_open = 0; status[0] = 0; menu_play("S_BACK"); }
+        if (wheel && lan_iface_count > 0)
+            lan_iface_cursor = (lan_iface_cursor + (wheel > 0 ? -1 : 1) + lan_iface_count) % lan_iface_count;
+        return;
+    }
     if (leave_ask) {
         for (int i = 0; i < 2; i++)
             if (inside(&leave_hits[i], x, y)) {
@@ -1073,13 +1653,13 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
         return;
     }
     if (rules_open) {
-        for (int i = 0; i <= RULE_PLAYERS; i++)
+        for (int i = 0; i < room_rule_count(); i++)
             if (inside(&rule_hits[i], x, y)) {
                 if (moved && rules_cursor != i) rules_cursor = i, menu_page_sound(1);
-                if (left && r.host) rules_cursor = i, change_rule(i, x < rule_hits[i].x + rule_hits[i].w / 2 ? -1 : 1);
+                if (left && (r.host || i == RULE_REPORT) && (i != RULE_IP || !room.is_tailnet)) rules_cursor = i, change_rule(i, x < rule_hits[i].x + rule_hits[i].w / 2 ? -1 : 1);
             }
         if (left && inside(&rules_back, x, y)) rules_open = 0, menu_play("S_BACK");
-        if (wheel && r.host) change_rule(rules_cursor, wheel > 0 ? -1 : 1);
+        if (wheel && r.host && (rules_cursor != RULE_IP || !room.is_tailnet)) change_rule(rules_cursor, wheel > 0 ? -1 : 1);
         return;
     }
     if (track_list) {
@@ -1097,6 +1677,9 @@ static void room_mouse(MenuPage *p, int x, int y, int moved, int left, int wheel
         copy_code();
         return;
     }
+    if (left && r.host && (room.is_lan || room.is_tailnet))
+        for (int i = 0; i < NET_MAX_SLOTS; i++)
+            if (inside(&member_hits[i], x, y)) { request_kick(i); return; }
     for (int f = 0; f < RF_COUNT; f++) {
         if (!inside(&hits[f], x, y) || !focusable(f, &r)) continue;
         if (rf != f && (moved || left)) {
@@ -1257,6 +1840,22 @@ static void draw_setting(int f, int y, const char *label, const char *value, con
     hit(&hits[f], L_X, y - 2, L_W, 13);
 }
 
+static const char *lan_check_label(void)
+{
+    if (!room.check_id) return "RUN CHECK";
+    if (room.check_valid) return "ALL OK";
+    for (int i = 0; i < room.nmembers; i++) {
+        const NetMember *m = &room.member[i];
+        if (!m->ready || m->check_id != room.check_id) continue;
+        if (m->check_state == 3) return "RETRY";
+    }
+    for (int i = 0; i < room.nmembers; i++) {
+        const NetMember *m = &room.member[i];
+        if (m->ready && (m->check_id != room.check_id || m->check_state == 1)) return "TESTING";
+    }
+    return "RUN AGAIN";
+}
+
 static void draw_left(const RoomNow *r)
 {
     const NetLobby *l = &room;
@@ -1277,7 +1876,8 @@ static void draw_left(const RoomNow *r)
     hit(&hits[RF_TRACK], L_X, TOP + 14, L_W, 20);
     draw_setting(RF_BOTS, TOP + 39, "COMPUTER RIDERS", l->laps & ROOM_NO_BOTS ? "OFF" : "ON", r);
     draw_setting(RF_CHEATS, TOP + 52, "CHEATS", l->laps & ROOM_CHEATS ? "ON" : "OFF", r);
-    draw_setting(RF_PUBLIC, TOP + 65, "ROOM", l->is_p2p ? "P2P, PRIVATE" : l->is_public ? "PUBLIC" : "PRIVATE", r);
+    draw_setting(RF_PUBLIC, TOP + 65, l->is_tailnet ? "TAILNET CHECK" : l->is_lan ? "LAN CHECK" : "ROOM",
+                 l->is_lan ? lan_check_label() : l->is_p2p ? "P2P, PRIVATE" : l->is_public ? "PUBLIC" : "PRIVATE", r);
     /* the room's rules in one line; Cross opens them (everyone reads them, the host changes them) */
     on = rf == RF_RULES && !track_list && !leave_ask && !rules_open;
     if (on) bar(L_X + 6, TOP + 77, L_W - 12, 11);
@@ -1285,22 +1885,25 @@ static void draw_left(const RoomNow *r)
     /* short: the left column is narrow beside two columns of cards (AUTO is always 30 s) */
     /* the longest form that fits the panel: "HOST STARTS" -> "HOST", then "NEXT TRACK" -> "NEXT" */
     char forms[3][48];
-    const char *pending = l->rules_pending ? " *" : "", *then_short = l->then == 0 ? "SAME" : l->then == 2 ? "RANDOM" : "NEXT";
-    snprintf(forms[0], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST STARTS" : "AUTO",
-             then_name(l->then), pending);
-    snprintf(forms[1], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST" : "AUTO",
-             then_name(l->then), pending);
-    snprintf(forms[2], 48, "%s - %s - %s%s", window_name(l->finish_window), l->next_race ? "HOST" : "AUTO", then_short, pending);
+    const char *pending = l->rules_pending ? " *" : "";
+    const int next = l->is_lan || l->next_race, then = l->then;
+    const char *then_short = then == 0 ? "SAME" : then == 2 ? "RANDOM" : "NEXT";
+    snprintf(forms[0], 48, "%s - %s - %s%s", window_name(l->finish_window), next ? "HOST STARTS" : "AUTO",
+             then_name(then), pending);
+    snprintf(forms[1], 48, "%s - %s - %s%s", window_name(l->finish_window), next ? "HOST" : "AUTO",
+             then_name(then), pending);
+    snprintf(forms[2], 48, "%s - %s - %s%s", window_name(l->finish_window), next ? "HOST" : "AUTO", then_short, pending);
     const char *const texts[] = {forms[0], forms[1], forms[2], NULL};
     const char *rules = first_fit(texts, st_off, 70, L_W - 16);
     put(MENU_CENTRE, cx, TOP + 89, rules, fit(rules, st_off, 70, L_W - 16));
     hit(&hits[RF_RULES], L_X, TOP + 75, L_W, 24);
     rect(L_X + 8, TOP + 99, L_W - 16, 1, (const int[]){0, 0, 0}, 128);
-    /* the join code; Circle (or a click) copies it */
+    /* Circle (or a click) copies the join code or this room's host address. */
     int copied = copied_at > 0 && host_seconds() - copied_at < 1.5;
-    put(MENU_LEFT, L_X + 10, TOP + 105, copied ? (copied_ok ? "COPIED" : "FAILED") : "CODE",
+    put(MENU_LEFT, L_X + 10, TOP + 105, copied ? (copied_ok ? "COPIED" : "FAILED") : l->is_tailnet ? "HOST TAILNET IP" : l->is_lan ? "HOST WI-FI IP" : "CODE",
          !copied ? menu_style(st_off, 80, -1, 0, 0) : copied_ok ? tint(st_row, 80, green) : tint(st_row, 80, red));
-    put(MENU_RIGHT, L_X + L_W - 10, TOP + 102, l->code[0] ? l->code : "------", menu_style(st_on, 120, -1, 0, 0));
+    const char *invite = l->is_lan ? (l->lan_address[0] ? l->lan_address : "ASK HOST") : (l->code[0] ? l->code : "------");
+    put(MENU_RIGHT, L_X + L_W - 10, TOP + 102, invite, fit(invite, st_on, 105, L_W - 20));
     hit(&code_hit, L_X, TOP + 100, L_W, 17);
 }
 
@@ -1327,18 +1930,26 @@ static void draw_card(int i)
     }
     const NetMember *m = &l->member[i];
     RoomNow now = room_now();
-    const char *tag = m->choosing ? "CHOOSING" : m->ready ? "READY" : "WAIT";
-    if (now.racing && !strcmp(m->race_state, "racing")) tag = "RACING";
-    else if (now.racing && !strcmp(m->race_state, "finished")) tag = "DONE";
-    else if (now.racing && !strcmp(m->race_state, "dnf")) tag = "OUT";
-    else if (now.starting && m->ready) tag = "STARTING";
+    int can_kick = l->is_host && (l->is_lan || l->is_tailnet) &&
+                   m->id != l->member_id && m->id != l->host_id;
+    const char *tag = m->connection_state ? "REJOINING" : m->choosing ? "CHOOSING" : m->ready ? "READY" : "WAIT";
+    if (!m->connection_state && now.racing && !strcmp(m->race_state, "racing")) tag = "RACING";
+    else if (!m->connection_state && now.racing && !strcmp(m->race_state, "finished")) tag = "DONE";
+    else if (!m->connection_state && now.racing && !strcmp(m->race_state, "dnf")) tag = "OUT";
+    else if (!m->connection_state && now.starting && m->ready) tag = "STARTING";
+    else if (!m->connection_state && l->is_lan && m->ready && l->check_id && m->check_id == l->check_id)
+        tag = m->check_state == 2 ? "LINK OK" : m->check_state == 1 ? "CHECKING" : m->check_state == 3 ? "NO REPLY" : "READY";
     snprintf(line, sizeof line, "%d %.9s%s", i + 1, m->name, m->id == l->host_id ? " HOST" : m->id == l->member_id ? " YOU" : "");
     for (char *c = line; *c; c++) if (*c >= 'a' && *c <= 'z') *c -= 32;
     rect(x, y + 1, 2, 18, m->ready ? green : amber, 128);
     put(MENU_LEFT, x + 5, y + 2, line, fit(line, st_row, 85, 112));
-    put(MENU_RIGHT, x + w - 5, y + 2, tag, menu_style(st_on, 70, -1, 0, 0));
+    put(MENU_RIGHT, x + w - (can_kick ? 25 : 5), y + 2, tag, m->connection_state ? tint(st_row, 80, amber) : menu_style(st_on, 70, -1, 0, 0));
     detail[0] = 0;
-    if (now.racing && !strcmp(m->race_state, "finished")) {
+    if (m->connection_state) {
+        int left = (m->reconnect_ms + 999) / 1000;
+        if (left > 0) snprintf(detail, sizeof detail, "REJOIN IN %dS", left);
+        else snprintf(detail, sizeof detail, "TRYING TO REJOIN");
+    } else if (now.racing && !strcmp(m->race_state, "finished")) {
         race_time(line, sizeof line, m->finish_ticks);
         snprintf(detail, sizeof detail, "%s %s", ordinal(m->place), line);
     } else if (now.racing && !strcmp(m->race_state, "dnf"))
@@ -1357,8 +1968,13 @@ static void draw_card(int i)
     if (m->rtt_ms >= 0) snprintf(ping, sizeof ping, "%d MS", m->rtt_ms);
     else snprintf(ping, sizeof ping, "-");
     MenuStyle ps = menu_style(st_row, 70, -1, 0, 0);
-    put(MENU_RIGHT, x + w - 5, y + 11, ping, ps);
-    draw_bars(x + w - 18 - menu_text_width(ping, &ps) * 640 / vw, y + 18, m->rtt_ms);
+    put(MENU_RIGHT, x + w - (can_kick ? 25 : 5), y + 11, ping, ps);
+    draw_bars(x + w - (can_kick ? 39 : 18) - menu_text_width(ping, &ps) * 640 / vw, y + 18, m->rtt_ms);
+    if (can_kick) {
+        box(x + w - 20, y + 3, 15, 14, 110);
+        put(MENU_CENTRE, x + w - 12, y + 5, "X", tint(st_on, 90, red));
+        hit(&member_hits[i], x + w - 21, y + 1, 19, 18);
+    }
 }
 
 static void draw_bar_cell(int f, int k, const char *label, const char *why, const RoomNow *r, int green_cell)
@@ -1382,11 +1998,13 @@ static void draw_bar(const RoomNow *r)
     char why[24];
     box(BAR_X, BAR_Y, BAR_W, BAR_H, 90);
     draw_bar_cell(RF_RIDER, 0, selected ? "CHANGE RIDER" : "CHOOSE RIDER", NULL, r, 0);
-    draw_bar_cell(RF_READY, 1, "READY", NULL, r, r->own_ready);
+    draw_bar_cell(RF_READY, 1, l->last_race_id ? "REMATCH" : "READY", NULL, r, r->own_ready);
     if (!r->host) draw_bar_cell(RF_START, 2, "HOST STARTS", NULL, r, 0);
     else if (r->racing) draw_bar_cell(RF_START, 2, "START", "RACE LIVE", r, 0);
     else if (r->starting) draw_bar_cell(RF_START, 2, "STARTING", NULL, r, 0);
     else if (r->ready == 0) draw_bar_cell(RF_START, 2, "START", "NOBODY READY", r, 0);
+    else if (l->is_lan && l->nmembers > 1 && !l->check_valid) draw_bar_cell(RF_START, 2, "START", "CHECK LINKS FIRST", r, 0);
+    else if (l->is_lan && l->nmembers == 1) draw_bar_cell(RF_START, 2, "START SOLO", NULL, r, 0);
     else if (r->ready < l->nmembers) {
         snprintf(why, sizeof why, "%d NOT READY", l->nmembers - r->ready);
         draw_bar_cell(RF_START, 2, "START NOW", why, r, 0);
@@ -1410,7 +2028,12 @@ static void draw_status(const RoomNow *r)
     for (int i = 0; i < l->nmembers; i++)
         if (r->riding == 1 && !strcmp(l->member[i].race_state, "racing")) riding = i;
     if (status[0]) snprintf(line, sizeof line, "%s", status);
-    else if (!r->in) snprintf(line, sizeof line, "CONNECTING TO THE SERVER...");
+    else if (l->state == NET_RECONNECTING && l->is_lan) {
+        int left = (l->reconnect_remaining_ms + 999) / 1000;
+        snprintf(line, sizeof line, l->is_tailnet ? "TAILNET REJOIN: %d S LEFT - ATTEMPT %d/8" : "LAN REJOIN: %d S LEFT - ATTEMPT %d/8", left, l->reconnect_attempt > 8 ? 8 : l->reconnect_attempt);
+        c = amber;
+    }
+    else if (!r->in) snprintf(line, sizeof line, l->is_tailnet ? "CONNECTING TO THE TAILNET HOST..." : l->is_lan ? "CONNECTING TO THE LAN HOST..." : "CONNECTING TO THE SERVER...");
     else if (l->is_p2p && host_seconds() < p2p_notice_until) snprintf(line, sizeof line, "%s", p2p_notice);
     else if (r->starting && r->own_ready) snprintf(line, sizeof line, "YOU'RE IN THIS RACE: UNREADY TO STAY OUT"), c = green;
     else if (r->starting) snprintf(line, sizeof line, "YOU WEREN'T READY: READY NOW TO RACE THE ONE AFTER");
@@ -1426,6 +2049,9 @@ static void draw_status(const RoomNow *r)
     } else if (r->racing && r->own_ready) snprintf(line, sizeof line, "RACE LIVE: YOU'RE READY FOR THE NEXT ONE"), c = green;
     else if (r->racing) snprintf(line, sizeof line, selected ? "RACE LIVE: PRESS READY TO RACE THE NEXT ONE"
                                                              : "RACE LIVE: CHOOSE YOUR RIDER FOR THE NEXT ONE");
+    else if (l->is_lan && l->nmembers > 1 && r->ready && !l->check_valid)
+        snprintf(line, sizeof line, l->is_tailnet ? (r->host ? "RUN THE TAILNET CHECK BEFORE STARTING" : "WAITING FOR THE HOST TO CHECK LINKS")
+                                                   : (r->host ? "RUN THE LAN CHECK BEFORE STARTING" : "WAITING FOR THE HOST TO CHECK LINKS"));
     else if (!selected) snprintf(line, sizeof line, "CHOOSE YOUR RIDER FIRST");
     else if (r->intermission)
         snprintf(line, sizeof line, r->own_ready ? "NEXT RACE ON %s: ONLY READY RIDERS START" : "NEXT RACE ON %s: PRESS READY TO RACE IT",
@@ -1435,7 +2061,9 @@ static void draw_status(const RoomNow *r)
         snprintf(line, sizeof line, r->own_ready ? "WAITING FOR THE HOST TO START THE NEXT RACE" : "PRESS READY TO RACE THE NEXT ONE");
     else if (l->last_race_id && l->next_race && r->ready)
         snprintf(line, sizeof line, "START NOW WHEN YOU LIKE: ONLY READY RIDERS RACE");
-    else if (l->nmembers < 2) snprintf(line, sizeof line, "WAITING FOR PLAYERS: SHARE THE CODE %s", l->code);
+    else if (l->is_lan && l->nmembers == 1 && r->host && r->own_ready)
+        snprintf(line, sizeof line, "SOLO RACE READY: PRESS START");
+    else if (l->nmembers < 2) snprintf(line, sizeof line, l->is_tailnet ? "WAITING FOR PLAYERS: SHARE TAILNET %s" : l->is_lan ? "WAITING FOR PLAYERS: SHARE %s" : "WAITING FOR PLAYERS: SHARE THE CODE %s", l->is_lan ? l->lan_address : l->code);
     else if (!r->own_ready) snprintf(line, sizeof line, "PRESS READY WHEN YOU LIKE YOUR RIDER");
     else if (waiting + choosing_n == 1 && who >= 0)
         snprintf(line, sizeof line, l->member[who].choosing ? "%.12s IS CHOOSING A RIDER" : "WAITING FOR %.12s", l->member[who].name);
@@ -1548,17 +2176,34 @@ static void draw_track_list(void)
 static void draw_rules(const RoomNow *r)
 {
     const NetLobby *l = &room;
-    char line[64], about[96], capacity[8];
+    char line[112], about[112], capacity[8];
+    int count = room_rule_count(), compact = count > RULE_PLAYERS + 1;
     rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
-    box(110, 30, 420, 152, 110);
-    put(MENU_CENTRE, 320, 36, "ROOM RULES", menu_style(st_row, 115, -1, 0, 0));
-    for (int i = 0; i < RULES; i++) {
-        int y = 56 + i * 28, on = i == rules_cursor;
-        const char *label = i == RULE_WINDOW ? "FINISH WINDOW" : i == RULE_NEXT ? "NEXT RACE" : i == RULE_THEN ? "THEN" : "PLAYERS";
+    box(compact ? 84 : 110, compact ? 18 : 30, compact ? 472 : 420, compact ? 194 : 152, 110);
+    put(MENU_CENTRE, 320, compact ? 23 : 36, l->is_tailnet ? "TAILNET ROOM SETTINGS" : l->is_lan ? "LAN ROOM SETTINGS" : "ROOM RULES", menu_style(st_row, 115, -1, 0, 0));
+    for (int i = 0; i < count; i++) {
+        int y = compact ? 43 + i * 23 : 56 + i * 28, on = i == rules_cursor;
+        int fixed_lan = l->is_lan && i == RULE_NEXT;
+        const char *label = i == RULE_WINDOW ? "FINISH WINDOW" : i == RULE_NEXT ? "NEXT RACE" : i == RULE_THEN ? "THEN"
+                          : i == RULE_PLAYERS ? "PLAYERS" : i == RULE_PIN ? "ROOM PIN" : i == RULE_IP ? (l->is_tailnet ? "TAILNET IP:PORT" : "HOST IP") : "COPY REPORT";
         const char *value = i == RULE_WINDOW ? window_name(l->finish_window) : i == RULE_NEXT ? next_name(l->next_race)
-                          : i == RULE_THEN ? then_name(l->then) : (snprintf(capacity, sizeof capacity, "%d", l->max_players), capacity);
-        snprintf(line, sizeof line, r->host ? "%s:  < %s >" : "%s:  %s", label, value);
-        if (i == RULE_WINDOW && l->finish_window)
+                          : i == RULE_THEN ? then_name(l->then) : i == RULE_PLAYERS ? (snprintf(capacity, sizeof capacity, "%d", l->max_players), capacity)
+                          : i == RULE_PIN ? (l->pin_required ? "REQUIRED" : "OPEN") : i == RULE_IP ? (l->lan_address[0] ? l->lan_address : "UNAVAILABLE") : "CLIPBOARD";
+        if (l->is_lan && i == RULE_NEXT) value = "HOST STARTS";
+        snprintf(line, sizeof line, r->host && !fixed_lan ? "%s:  < %s >" : "%s:  %s", label, value);
+        if (l->is_lan && i == RULE_NEXT)
+            snprintf(about, sizeof about, l->is_tailnet ? "TAILNET MODE: THE HOST STARTS EACH RACE MANUALLY." : "LAN MODE: THE HOST STARTS EACH RACE MANUALLY.");
+        else if (l->is_lan && i == RULE_PLAYERS)
+            snprintf(about, sizeof about, "ROOM CAPACITY: 2 TO 10 PLAYERS.");
+        else if (l->is_lan && i == RULE_PIN)
+            snprintf(about, sizeof about, r->host ? "4-8 DIGITS TO SET; REMOVE PIN OPENS THE ROOM." : "THE HOST CONTROLS WHETHER THIS ROOM REQUIRES A PIN.");
+        else if (l->is_lan && i == RULE_IP)
+            snprintf(about, sizeof about, l->is_tailnet ? "SHARE THE DISPLAYED TAILNET IPv4:PORT WITH THE GUEST." : r->host ? "SELECT ONLY AN ADDRESS ASSIGNED TO THIS DEVICE, OR REFRESH WI-FI." : "CURRENT ADDRESS ADVERTISED BY THE HOST PHONE.");
+        else if (l->is_lan && i == RULE_REPORT)
+            snprintf(about, sizeof about, l->is_tailnet ? "COPY CONNECTION STATUS AND RECENT ERRORS; ROOM CODES AND IP ADDRESSES ARE OMITTED." : "COPY CONNECTION STATUS AND RECENT LAN ERRORS; ROOM CODES AND IP ADDRESSES ARE OMITTED.");
+        else if (l->is_lan && i == RULE_THEN)
+            snprintf(about, sizeof about, "AFTER EACH COMPLETED RACE: SAME, NEXT, OR RANDOM.");
+        else if (i == RULE_WINDOW && l->finish_window)
             snprintf(about, sizeof about, "AFTER THE FIRST PLAYER FINISHES, THE OTHERS HAVE %s. THEN DNF.", window_name(l->finish_window));
         else if (i == RULE_WINDOW) snprintf(about, sizeof about, "THE RACE WAITS FOR EVERYONE TO FINISH OR GIVE UP.");
         else if (i == RULE_NEXT && !l->next_race)
@@ -1568,13 +2213,79 @@ static void draw_rules(const RoomNow *r)
         else snprintf(about, sizeof about, "ROOM SIZE: 2 TO 10 PLAYERS");
         if (on) bar(130, y - 1, 380, 12);
         put(MENU_CENTRE, 320, y, line, on ? st_on : st_row);
-        put(MENU_CENTRE, 320, y + 12, about, fit(about, st_off, 70, 400));
-        hit(&rule_hits[i], 120, y - 3, 400, 26);
+        put(MENU_CENTRE, 320, y + (compact ? 10 : 12), about, fit(about, st_off, compact ? 62 : 70, compact ? 440 : 400));
+        hit(&rule_hits[i], compact ? 90 : 120, y - 3, compact ? 460 : 400, compact ? 21 : 26);
     }
     const char *note = l->rules_pending ? "CHANGED DURING A RACE: THE NEW RULES COUNT FROM THE NEXT RACE"
                                         : "CHANGED DURING A RACE? IT COUNTS FROM THE NEXT RACE.";
-    put(MENU_CENTRE, 320, 166, note, fit(note, l->rules_pending ? tint(st_row, 75, amber) : st_off, 75, 400));
-    hit(&rules_back, 110, 160, 420, 20);
+    put(MENU_CENTRE, 320, compact ? 181 : 166, note, fit(note, l->rules_pending ? tint(st_row, 75, amber) : st_off, 75, compact ? 440 : 400));
+    put(MENU_CENTRE, 320, compact ? 199 : 166, "CROSS / TRIANGLE TO BACK", st_off);
+    hit(&rules_back, compact ? 84 : 110, compact ? 192 : 160, compact ? 472 : 420, compact ? 18 : 20);
+}
+
+static void draw_host_pin(void)
+{
+    char masked[16];
+    size_t n = strlen(host_pin_entry);
+    if (n > 8) n = 8;
+    memset(masked, '*', n);
+    masked[n] = 0;
+    rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
+    box(142, 36, 356, 152, 115);
+    put(MENU_CENTRE, 320, 44, "ROOM PIN", menu_style(st_row, 115, -1, 0, 0));
+    char line[48];
+    snprintf(line, sizeof line, "NEW PIN: %s", masked[0] ? masked : "(not entered)");
+    put(MENU_CENTRE, 320, 66, line, st_on);
+    put(MENU_CENTRE, 320, 82, "USE 4-8 DIGITS; SHARE IT ONLY WITH TRUSTED RIDERS.", fit("USE 4-8 DIGITS; SHARE IT ONLY WITH TRUSTED RIDERS.", st_off, 70, 332));
+    memset(host_pin_digit_hits, 0, sizeof host_pin_digit_hits);
+    for (int i = 0; i < 10; i++) {
+        int x = 180 + i * 28;
+        if (i == host_pin_cursor) bar(x - 1, 94, 26, 17);
+        char digit[2] = {pin_letters[i], 0};
+        put(MENU_CENTRE, x + 12, 98, digit, i == host_pin_cursor ? st_on : st_row);
+        hit(&host_pin_digit_hits[i], x - 1, 92, 26, 21);
+    }
+    if (host_pin_action == 0) bar(206, 120, 228, 16);
+    put(MENU_CENTRE, 320, 124, "SET PIN", host_pin_action == 0 ? st_on : st_row);
+    hit(&host_pin_set_hit, 198, 117, 244, 21);
+    if (host_pin_action == 1) bar(206, 143, 228, 16);
+    put(MENU_CENTRE, 320, 147, "REMOVE PIN", host_pin_action == 1 ? st_on : st_row);
+    hit(&host_pin_remove_hit, 198, 140, 244, 21);
+    put(MENU_CENTRE, 250, 174, "DELETE LAST", st_row);
+    hit(&host_pin_delete_hit, 150, 163, 200, 22);
+    put(MENU_CENTRE, 420, 174, "CANCEL", st_row);
+    hit(&host_pin_cancel_hit, 360, 163, 120, 22);
+}
+
+static void draw_lan_ip(void)
+{
+    int rows = lan_iface_count < 8 ? lan_iface_count : 8;
+    int start = lan_iface_cursor - 3;
+    memset(lan_ip_hits, 0, sizeof lan_ip_hits);
+    if (start < 0) start = 0;
+    if (start + rows > lan_iface_count) start = lan_iface_count - rows;
+    if (start < 0) start = 0;
+    rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
+    box(74, 14, 492, 196, 115);
+    put(MENU_CENTRE, 320, 20, "HOST WI-FI ADDRESS", menu_style(st_row, 112, -1, 0, 0));
+    put(MENU_CENTRE, 320, 32, "ONLY PRIVATE IPv4 ADDRESSES ASSIGNED TO THIS DEVICE ARE LISTED.", fit("ONLY PRIVATE IPv4 ADDRESSES ASSIGNED TO THIS DEVICE ARE LISTED.", st_off, 65, 470));
+    if (!lan_iface_count)
+        put(MENU_CENTRE, 320, 91, "NO ACTIVE PRIVATE LOCAL ADDRESS", tint(st_row, 90, amber));
+    for (int row = 0; row < rows; row++) {
+        int i = start + row, y = 46 + row * 16;
+        char line[72];
+        const NetLanInterface *iface = &lan_ifaces[i];
+        snprintf(line, sizeof line, "%s  %s%s", iface->is_wifi ? "WI-FI" : iface->name, iface->address,
+                 iface->selected ? "  CURRENT" : "");
+        if (i == lan_iface_cursor) bar(118, y - 2, 404, 13);
+        put(MENU_CENTRE, 320, y, line, fit(line, i == lan_iface_cursor ? st_on : st_row, 88, 392));
+        hit(&lan_ip_hits[i], 110, y - 2, 420, 15);
+    }
+    put(MENU_CENTRE, 230, 179, "REFRESH FROM WI-FI", st_row);
+    put(MENU_CENTRE, 420, 179, "BACK", st_row);
+    hit(&lan_ip_refresh_hit, 112, 172, 236, 22);
+    hit(&lan_ip_back_hit, 350, 172, 180, 22);
+    put(MENU_CENTRE, 320, 198, "SELECT A LISTED ADDRESS TO UPDATE THE HOST WI-FI IP.", fit("SELECT A LISTED ADDRESS TO UPDATE THE HOST WI-FI IP.", st_off, 65, 470));
 }
 
 static void draw_leave(const RoomNow *r)
@@ -1583,7 +2294,8 @@ static void draw_leave(const RoomNow *r)
     rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
     box(170, 68, 300, 86, 110);
     put(MENU_CENTRE, 320, 76, "LEAVE THE ROOM?", menu_style(st_row, 115, -1, 0, 0));
-    const char *why = r->host && l->nmembers > 1 ? "THE PLAYER HERE LONGEST BECOMES THE HOST"
+    const char *why = r->host && l->is_lan ? (l->is_tailnet ? "THIS TAILNET ROOM CLOSES WHEN YOU LEAVE" : "THIS LAN ROOM CLOSES WHEN YOU LEAVE")
+                    : r->host && l->nmembers > 1 ? "THE PLAYER HERE LONGEST BECOMES THE HOST"
                     : l->nmembers > 1 ? "YOU CAN COME BACK WITH THE CODE" : "YOU ARE THE LAST ONE: THE ROOM CLOSES";
     put(MENU_CENTRE, 320, 94, why, fit(why, st_off, 80, 280));
     for (int i = 0; i < 2; i++) {
@@ -1594,12 +2306,31 @@ static void draw_leave(const RoomNow *r)
     }
 }
 
+static void draw_kick(void)
+{
+    char question[64];
+    rect(0, 0, 640, 224, (const int[]){0, 0, 0}, 90);
+    box(152, 62, 336, 96, 115);
+    put(MENU_CENTRE, 320, 70, "REMOVE PLAYER?", menu_style(st_row, 115, -1, 0, 0));
+    snprintf(question, sizeof question, "REMOVE %.24s FROM THIS ROOM?", kick_member_name);
+    put(MENU_CENTRE, 320, 91, question, fit(question, st_off, 82, 306));
+    for (int i = 0; i < 2; i++) {
+        int y = 112 + i * 17;
+        if (kick_choice == i) bar(214, y - 1, 212, 13);
+        put(MENU_CENTRE, 320, y, i ? "REMOVE PLAYER" : "CANCEL", kick_choice == i ? (i ? tint(st_on, 95, red) : st_on) : st_row);
+        hit(&kick_hits[i], 206, y - 3, 228, 16);
+    }
+}
+
 /* The title and the footer, which the game draws: before its update. */
 static void room_texts(MenuPage *p)
 {
     const NetLobby *l = &room;
     RoomNow r = room_now();
-    if (r.starting)
+    if (l->state == NET_RECONNECTING && l->is_lan) {
+        int left = (l->reconnect_remaining_ms + 999) / 1000;
+        snprintf(title_text, sizeof title_text, "REJOINING  %d:%02d", left / 60, left % 60);
+    } else if (r.starting)
         snprintf(title_text, sizeof title_text, r.own_ready ? "RACE STARTS IN  %d" : "STARTING  %d", (l->countdown_ms + 999) / 1000);
     else if (r.racing && l->finish_ends_at) {
         int left = seconds_to(l->finish_ends_at);
@@ -1614,21 +2345,30 @@ static void room_texts(MenuPage *p)
     } else
         snprintf(title_text, sizeof title_text, "RACE ROOM");
     p->title = title_text;
-    if (l->state == NET_RECONNECTING && l->notice[0])  /* the server restarts the room (finding 184) */
+    if (host_pin_open)
+        snprintf(footer_text, sizeof footer_text, GLYPH_LEFT GLYPH_RIGHT " DIGIT   " GLYPH_SQUARE " ADD   " GLYPH_CIRCLE " DELETE   " GLYPH_CROSS " SELECT");
+    else if (lan_ip_open)
+        snprintf(footer_text, sizeof footer_text, "UP/DOWN ADDRESS   " GLYPH_CROSS " SELECT   " GLYPH_CIRCLE " REFRESH   " GLYPH_TRIANGLE " BACK");
+    else if (l->state == NET_RECONNECTING && l->notice[0])  /* the server restarts the room (finding 184) */
         snprintf(footer_text, sizeof footer_text, "%s", l->notice);
     else if (rules_open)
         snprintf(footer_text, sizeof footer_text, r.host ? GLYPH_LEFT GLYPH_RIGHT " CHANGE   " GLYPH_TRIANGLE " BACK"
                                                          : GLYPH_TRIANGLE " BACK");
     else if (leave_ask)
         snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " CHOOSE   " GLYPH_TRIANGLE " STAY");
+    else if (kick_ask)
+        snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " CONFIRM   " GLYPH_TRIANGLE " CANCEL");
     else if (track_list)
         snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " CHOOSE   " GLYPH_TRIANGLE " BACK");
     else if (rf == RF_TRACK)
         snprintf(footer_text, sizeof footer_text, GLYPH_LEFT GLYPH_RIGHT " TRACK   " GLYPH_CROSS " ALL TRACKS   " GLYPH_SQUARE
                  " READY   " GLYPH_TRIANGLE " LEAVE");
-    else
-        snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " SELECT   " GLYPH_SQUARE " READY   " GLYPH_CIRCLE " COPY CODE   "
+    else if (l->is_lan)
+        snprintf(footer_text, sizeof footer_text, l->is_tailnet ? GLYPH_CROSS " SELECT   " GLYPH_SQUARE " READY   " GLYPH_CIRCLE " COPY TAILNET IP   "
+                 GLYPH_TRIANGLE " LEAVE" : GLYPH_CROSS " SELECT   " GLYPH_SQUARE " READY   " GLYPH_CIRCLE " COPY WI-FI IP   "
                  GLYPH_TRIANGLE " LEAVE");
+    else
+        snprintf(footer_text, sizeof footer_text, GLYPH_CROSS " SELECT   " GLYPH_SQUARE " READY   " GLYPH_CIRCLE " COPY CODE   " GLYPH_TRIANGLE " LEAVE");
     p->footer = footer_text;
 }
 
@@ -1645,6 +2385,7 @@ static void room_draw(MenuPage *p)
     st_off = menu_page_style(p, MENU_STYLE_OFF);
     menu_draw_begin();
     memset(hits, 0, sizeof hits);
+    memset(member_hits, 0, sizeof member_hits);
     /* the countdown: under the title counting, a bar runs out */
     {
         double left = 0, whole = 1;
@@ -1660,6 +2401,18 @@ static void room_draw(MenuPage *p)
     }
     /* The game draws all text over every box: a list or a question over the room would show the
        room's text through it, so it is drawn alone. */
+    if (host_pin_open) {
+        draw_host_pin();
+        return;
+    }
+    if (lan_ip_open) {
+        draw_lan_ip();
+        return;
+    }
+    if (kick_ask) {
+        draw_kick();
+        return;
+    }
     if (track_list || leave_ask || rules_open) {
         if (track_list) draw_track_list();
         else if (rules_open) draw_rules(r);
@@ -1669,7 +2422,7 @@ static void room_draw(MenuPage *p)
     draw_left(r);
     {
         char head[64];
-        int all = l->nmembers >= 2 && r->ready == l->nmembers;
+        int all = l->nmembers > 0 && r->ready == l->nmembers;
         if (r->racing) {
             put(MENU_LEFT, CARD_X + 3, TOP + 1, "RACE RESULTS - LIVE", menu_style(st_row, 80, -1, 0, 0));
             snprintf(head, sizeof head, "%d FINISHED - %d RACING", r->finished, r->riding);
@@ -1730,7 +2483,11 @@ static void room_countdown_sounds(void)
 static void room_open(void)
 {
     rf = rf_bar = selected ? RF_READY : RF_RIDER;
+    if (host_pin_open) close_host_pin();
+    lan_ip_open = host_pin_open = 0;
     track_list = leave_ask = rules_open = room_closed = 0;
+    kick_ask = kick_choice = kick_member_id = 0;
+    kick_member_name[0] = 0;
     seen_host = seen_track = -1;
     memset(seen_race, 0, sizeof seen_race);
     room_buttons = 0xFFFF, repeat_buttons = repeat_frames = 0;
@@ -1746,6 +2503,16 @@ static void room_update(MenuPage *p)
 {
     NetLobby *l = &room;
     host_service_net_get_lobby(GADDR(l));
+    record_lan_result(l);
+    if (kick_ask && (!l->is_host || !(l->is_lan || l->is_tailnet) || kick_target_index() < 0))
+        kick_ask = 0;
+    if (host_pin_open && (!l->is_host || !(l->is_lan || l->is_tailnet))) close_host_pin();
+    if (lan_ip_open && (!l->is_host || !l->is_lan || l->is_tailnet)) lan_ip_open = 0;
+    if (host_pin_open) {
+        int action = host_service_text_input_edit(GADDR(host_pin_entry), sizeof host_pin_entry, GADDR(pin_letters));
+        if (action < 0) close_host_pin();
+        else if (action > 0) submit_host_pin(0);
+    }
     if (l->is_p2p && !p2p_noticed) {  /* once per room, when it first shows */
         p2p_noticed = 1;
         p2p_notice_until = host_seconds() + 15;
@@ -1818,7 +2585,7 @@ static void page_update(MenuPage *p, int cursor)
         static char last[160];
         char trace[160];
         snprintf(trace, sizeof trace, "view=%d row=%d entry=%s", screen, cursor,
-                 screen == NAME || screen == CODE ? entry : "");
+                 screen == NAME || screen == ROOM_NAME || screen == CODE || screen == TAILNET_HOST_ADDRESS || screen == TAILNET_JOIN_ADDRESS ? entry : "");
         if (strcmp(last, trace)) {
             snprintf(last, sizeof last, "%s", trace);
             hle_log("online menu: %s\n", trace);
@@ -1827,6 +2594,7 @@ static void page_update(MenuPage *p, int cursor)
     p->footer = status[0] ? status : NULL;
     poll_iso();   /* the hashing host job: its digest lands in iso_hash */
     poll_list();  /* the fetching host job: its rows land in list */
+    poll_lan_scan();
     if (connecting) {
         connect_poll(p);
         p->footer = status[0] ? status : NULL;
@@ -1841,13 +2609,25 @@ static void page_update(MenuPage *p, int cursor)
         {
             int kind = cursor < home_rows ? home_kind[cursor] : HOME_NAME;
             /* what keeps this PC out of a room; the list and the name need no disc */
-            if (!status[0] && ((kind != HOME_NAME && kind != HOME_LIST) || disc_shown) && not_ready()) p->footer = not_ready();
+            const char *why = kind == HOME_LAN_HOST || kind == HOME_LAN_JOIN || kind == HOME_TAILNET ? not_ready_local() : not_ready();
+            if (!status[0] && ((kind != HOME_NAME && kind != HOME_ROOM_NAME && kind != HOME_HISTORY && kind != HOME_LIST) || disc_shown) && why) p->footer = why;
             else if (!status[0] && kind == HOME_P2P) p->footer = p2p_row_notice;
         }
         break;
     case LIST:
         if (list_state == 2 && !list_shown) menu_page_rebuild(p);  /* the answer came: the rows again */
         for (int i = 0; list_shown && i < list_count; i++) list_row(i);
+        break;
+    case LAN_DISCOVERY:
+        if (lan_scan_state == 2 && lan_refresh_at > 0 && host_seconds() >= lan_refresh_at) {
+            start_lan_scan();
+            menu_page_rebuild(p);
+            break;
+        }
+        if (lan_scan_state != 1 && !lan_scan_shown) {
+            lan_scan_shown = 1;
+            menu_page_rebuild(p);
+        }
         break;
     case QUICK:
         if (list_state == 2 && !list_shown) {
@@ -1865,15 +2645,38 @@ static void page_update(MenuPage *p, int cursor)
         }
         break;
     case NAME:
+    case ROOM_NAME:
     case CODE:
+    case LAN_ADDRESS:
+    case TAILNET_HOST_ADDRESS:
+    case TAILNET_JOIN_ADDRESS:
         {
-            int action = host_service_text_input_edit(GADDR(entry), (screen == NAME ? NAME_MAX : P2P_CODE_LENGTH) + 1, GADDR(screen == NAME ? name_letters : code_letters));
-            if (action < 0) { go(HOME); return; }
+            int max = screen == NAME || screen == ROOM_NAME ? PLAYER_NAME_MAX : screen == CODE ? P2P_CODE_LENGTH : 21;
+            const char *letters = screen == NAME || screen == ROOM_NAME ? name_letters : screen == CODE ? code_letters : lan_letters;
+            int action = host_service_text_input_edit(GADDR(entry), max + 1, GADDR(letters));
+            if (action < 0) {
+                int back = screen == TAILNET_HOST_ADDRESS || screen == TAILNET_JOIN_ADDRESS ? TAILNET_MENU
+                         : screen == LAN_ADDRESS ? LAN_DISCOVERY : HOME;
+                go(back);
+                return;
+            }
             if (action > 0) { page_accept(p, 1); return; }
         }
         entry_text();
         if (!status[0])
-            p->footer = screen == CODE ? "TYPE/CTRL+V - ENTER JOIN - ESC BACK" : "TYPE OR PAD - ENTER DONE - ESC CANCEL";
+            p->footer = screen == CODE || screen == LAN_ADDRESS || screen == TAILNET_HOST_ADDRESS || screen == TAILNET_JOIN_ADDRESS ? "TYPE/CTRL+V - ENTER - ESC BACK" : "TYPE OR PAD - ENTER DONE - ESC CANCEL";
+        break;
+    case LAN_PIN: {
+        int action = host_service_text_input_edit(GADDR(pin_entry), sizeof pin_entry, GADDR(pin_letters));
+        if (action < 0) { page_back(p); return; }
+        if (action > 0) { page_accept(p, 1); return; }
+        snprintf(text[0], ROW_TEXT, "PIN: %s", pin_entry[0] ? pin_entry : "(optional)");
+        p->footer = status[0] ? status : "4-8 DIGITS FOR A LOCKED ROOM - ENTER JOIN - ESC BACK";
+        break;
+    }
+    case TAILNET_MENU:
+        break;
+    case TAILNET_HELP:
         break;
     case ROOM:
         room_update(p);
@@ -1893,6 +2696,11 @@ static void page_accept(MenuPage *p, int row)
             snprintf(entry, sizeof entry, "%s", name);
             entry_pick = 0;
             go(NAME);
+            break;
+        case HOME_ROOM_NAME:
+            snprintf(entry, sizeof entry, "%s", room_name);
+            entry_pick = 0;
+            go(ROOM_NAME);
             break;
         case HOME_QUICK:
         case HOME_LIST: {
@@ -1921,6 +2729,20 @@ static void page_accept(MenuPage *p, int row)
             go(CODE);
             break;
         }
+        case HOME_LAN_HOST:
+            enter_lan_room(1, NULL, "");
+            break;
+        case HOME_LAN_JOIN:
+            start_lan_scan();
+            go(LAN_DISCOVERY);
+            break;
+        case HOME_HISTORY:
+            history_page = 0;
+            go(HISTORY);
+            break;
+        case HOME_TAILNET:
+            go(TAILNET_MENU);
+            break;
         case HOME_UPDATE:
             hle_log("online menu: Update Now\n");
             host_service_update_request();  /* ends the game; the launcher updates it */
@@ -1934,10 +2756,46 @@ static void page_accept(MenuPage *p, int row)
             menu_page_rebuild(p);
         }
         break;
+    case LAN_DISCOVERY: {
+        int manual = lan_manual_row();
+        if (lan_scan_state == 2 && row >= 0 && row < lan_scan_count)
+            if (lan_rooms[row].pin_required)
+                guest_pin_prompt(lan_rooms[row].address, LAN_DISCOVERY);
+            else
+                enter_lan_room(0, lan_rooms[row].address, "");
+        else if (row == manual) {
+            entry[0] = 0;
+            entry_pick = 0;
+            go(LAN_ADDRESS);
+        } else if (row == lan_report_row()) {
+            copy_lan_report();
+        } else if (row == lan_search_row() && lan_scan_state != 1) {
+            start_lan_scan();
+            menu_page_rebuild_at(p, 0);
+        }
+        break;
+    }
+    case TAILNET_MENU:
+        if (row == 0) {
+            entry[0] = 0;
+            entry_pick = 0;
+            go(TAILNET_HOST_ADDRESS);
+        } else if (row == 1) {
+            tailnet_settings_load();
+            snprintf(entry, sizeof entry, "%s", tailnet_peer);
+            entry_pick = 0;
+            go(TAILNET_JOIN_ADDRESS);
+        } else if (row == 2) go(TAILNET_HELP);
+        else if (row == 3) go(HOME);
+        break;
     case NAME:
-    case CODE: {
-        const char *letters = screen == NAME ? name_letters : code_letters;
-        int max = screen == NAME ? NAME_MAX : P2P_CODE_LENGTH;
+    case ROOM_NAME:
+    case CODE:
+    case LAN_ADDRESS:
+    case TAILNET_HOST_ADDRESS:
+    case TAILNET_JOIN_ADDRESS: {
+        const char *letters = screen == NAME || screen == ROOM_NAME ? name_letters : screen == CODE ? code_letters : lan_letters;
+        int max = screen == NAME || screen == ROOM_NAME ? PLAYER_NAME_MAX : screen == CODE ? P2P_CODE_LENGTH : 21;
         size_t n = strlen(entry);
         if (row == 0) {
             if ((int)n < max) entry[n] = letters[entry_pick], entry[n + 1] = 0;
@@ -1950,17 +2808,71 @@ static void page_accept(MenuPage *p, int row)
                 save("name", "DHD_NET_NAME", name);
             }
             go(HOME);
-        } else if ((int)n == CODE_LENGTH || (int)n == P2P_CODE_LENGTH)
-            enter_room(0, entry);
-        else
-            snprintf(status, sizeof status, "A code has %d or %d letters and digits", CODE_LENGTH, P2P_CODE_LENGTH);
+        } else if (screen == ROOM_NAME) {
+            while (n && entry[n - 1] == ' ') entry[--n] = 0;
+            if (n) {
+                snprintf(room_name, sizeof room_name, "%s", entry);
+                save("room_name", "DHD_NET_ROOM_NAME", room_name);
+            }
+            go(HOME);
+        } else if (screen == CODE) {
+            if ((int)n == CODE_LENGTH || (int)n == P2P_CODE_LENGTH) enter_room(0, entry);
+            else snprintf(status, sizeof status, "A code has %d or %d letters and digits", CODE_LENGTH, P2P_CODE_LENGTH);
+        } else if (screen == LAN_ADDRESS) {
+            if (n) guest_pin_prompt(entry, LAN_ADDRESS);
+            else snprintf(status, sizeof status, "Enter the host's IPv4 address and port");
+        } else if (screen == TAILNET_HOST_ADDRESS) {
+            if (n) enter_tailnet_room(1, entry, "");
+            else snprintf(status, sizeof status, "Enter this device's Tailscale 100.x IPv4 address");
+        } else if (screen == TAILNET_JOIN_ADDRESS) {
+            if (n) {
+                snprintf(tailnet_peer, sizeof tailnet_peer, "%s", entry);
+                save("tailnet_peer", "DHD_TAILNET_PEER", tailnet_peer);
+                guest_pin_prompt(tailnet_peer, TAILNET_JOIN_ADDRESS);
+            } else snprintf(status, sizeof status, "Enter the host's Tailscale IPv4 address and port");
+        }
         break;
     }
+    case LAN_PIN:
+        if (row == 0) {
+            size_t n = strlen(pin_entry);
+            if (n < 8) pin_entry[n] = pin_letters[pin_cursor], pin_entry[n + 1] = 0;
+            menu_page_rebuild_at(p, 0);
+        } else if (row == 1) {
+            size_t n = strlen(pin_entry);
+            if (n && (n < 4 || n > 8))
+                snprintf(status, sizeof status, "A room PIN must be 4-8 digits.");
+            else if (pin_return_screen == TAILNET_JOIN_ADDRESS)
+                enter_tailnet_room(0, pending_lan_address, pin_entry);
+            else
+                enter_lan_room(0, pending_lan_address, pin_entry);
+        } else if (row == 2) {
+            page_back(p);
+        }
+        break;
     case QUICK:
         if (list_state == 2 && row == 1) enter_room(HOME_PUBLIC, NULL);  /* Quick Race found none: a public room */
         else if (list_state == 2 && row == 2) go(HOME);
         break;
+    case HISTORY: {
+        int rows = TRACK_COUNT - history_page * HISTORY_PAGE_SIZE;
+        if (rows > HISTORY_PAGE_SIZE) rows = HISTORY_PAGE_SIZE;
+        int nav = rows;
+        if (history_page > 0) {
+            if (row == nav) { history_page--; menu_page_rebuild_at(p, 0); break; }
+            nav++;
+        }
+        if ((history_page + 1) * HISTORY_PAGE_SIZE < TRACK_COUNT) {
+            if (row == nav) { history_page++; menu_page_rebuild_at(p, 0); break; }
+            nav++;
+        }
+        if (row == nav) go(HOME);
+        break;
+    }
     case ROOM:  /* the room reads the pads itself (room_input) */
+        break;
+    case TAILNET_HELP:
+        go(TAILNET_MENU);
         break;
     }
 }
@@ -1980,15 +2892,42 @@ static void page_back(MenuPage *p)
         menu_page_cancel(p);
         break;
     case NAME:
+    case ROOM_NAME:
     case CODE: {
         size_t n = strlen(entry);
         if (n) entry[n - 1] = 0;
         else go(HOME);
         break;
     }
+    case LAN_ADDRESS: {
+        size_t n = strlen(entry);
+        if (n) entry[n - 1] = 0;
+        else go(LAN_DISCOVERY);
+        break;
+    }
+    case TAILNET_HOST_ADDRESS:
+    case TAILNET_JOIN_ADDRESS: {
+        size_t n = strlen(entry);
+        if (n) entry[n - 1] = 0;
+        else go(TAILNET_MENU);
+        break;
+    }
+    case LAN_DISCOVERY:
+        go(HOME);
+        break;
     case LIST:
     case QUICK:
+    case HISTORY:
         go(HOME);
+        break;
+    case TAILNET_MENU:
+        go(HOME);
+        break;
+    case TAILNET_HELP:
+        go(TAILNET_MENU);
+        break;
+    case LAN_PIN:
+        go(pin_return_screen);
         break;
     case ROOM:  /* Triangle asks first (room_input) */
         break;
@@ -2002,9 +2941,12 @@ static void page_step(MenuPage *p, int row, int by)
         region_step(p, by);
         return;
     }
-    if ((screen == NAME || screen == CODE) && row == 0) {
-        int n = screen == NAME ? (int)sizeof name_letters - 1 : (int)sizeof code_letters - 1;
+    if ((screen == NAME || screen == ROOM_NAME || screen == CODE || screen == LAN_ADDRESS || screen == TAILNET_HOST_ADDRESS || screen == TAILNET_JOIN_ADDRESS) && row == 0) {
+        int n = screen == NAME || screen == ROOM_NAME ? (int)sizeof name_letters - 1 : screen == CODE ? (int)sizeof code_letters - 1 : (int)sizeof lan_letters - 1;
         entry_pick = (entry_pick + by + n) % n;
+        menu_page_sound(by > 0);
+    } else if (screen == LAN_PIN && row == 0) {
+        pin_cursor = (pin_cursor + by + 10) % 10;
         menu_page_sound(by > 0);
     }
 }
@@ -2022,6 +2964,7 @@ int port_online_menu(void)
     choosing = 0;
     reset_selection();
     load_player();
+    history_load();
     offline_mode = SETUP_WORD(0x10C);
     offline_submode = SETUP_WORD(0x110);
     offline_players = SETUP_WORD(0x288);

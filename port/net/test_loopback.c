@@ -38,6 +38,7 @@ typedef struct {
 static Player players[PLAYERS];
 static CRITICAL_SECTION relay;
 static int next_member, host_member, started;
+static int relay_lan;
 
 static void deliver(Player *to, const Player *from, int binary, const void *data, size_t n)
 {
@@ -118,7 +119,8 @@ static void relay_text(Player *p, const char *text)
         if (host_member < 0)
             host_member = p->member;
         snprintf(reply, sizeof reply, "{\"type\":\"welcome\",\"protocol\":1,\"code\":\"TEST22\",\"memberId\":%d,"
-                 "\"host\":%s,\"serverTime\":1}", p->member, p->member == host_member ? "true" : "false");
+                 "\"host\":%s,\"serverTime\":1,\"transport\":\"%s\"}", p->member,
+                 p->member == host_member ? "true" : "false", relay_lan ? "lan" : "sfu");
         text_to(p, p, reply);
         send_room();
     } else if (!strcmp(type, "ready") && json_bool(text, "ready", &p->ready))
@@ -277,7 +279,7 @@ static DWORD WINAPI game(void *arg)
     return 0;
 }
 
-static void run(const char *name, const int latency[PLAYERS], int dropper)
+static void run(const char *name, const int latency[PLAYERS], int dropper, int lan_room)
 {
     int i;
     NetTransport tr;
@@ -286,6 +288,7 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
     printf("%s\n", name);
     memset(players, 0, sizeof players);
     next_member = 0, host_member = -1, started = 0;
+    relay_lan = lan_room;
     for (i = 0; i < PLAYERS; i++) {
         Player *p = &players[i];
         char who[8];
@@ -309,6 +312,7 @@ static void run(const char *name, const int latency[PLAYERS], int dropper)
         client_lobby(&players[0].client, &lobby);
     } while ((lobby.nmembers < PLAYERS || !lobby.member[PLAYERS - 1].ready) && net_now_ms() < until);
     CHECK(lobby.state == NET_LOBBY && lobby.is_host && lobby.nmembers == PLAYERS);
+    CHECK(lobby.is_lan == lan_room && !lobby.is_p2p);
     CHECK(lobby.member[2].rider == 3 && lobby.member[3].bike == 1 && lobby.member[1].rtt_ms == latency[1] * 2);
     client_start(&players[0].client);
     until = net_now_ms() + 3000;
@@ -365,9 +369,10 @@ int main(void)
     static const int lan[PLAYERS] = {2, 3, 2, 4}, wan[PLAYERS] = {10, 25, 45, 70};
     timeBeginPeriod(1);
     InitializeCriticalSection(&relay);
-    run("four players, close", lan, -1);
-    run("four players, 10-70 ms away", wan, -1);
-    run("a player drops halfway", wan, 3);
+    run("four players, close", lan, -1, 0);
+    run("four players, 10-70 ms away", wan, -1, 0);
+    run("a player drops halfway", wan, 3, 0);
+    run("LAN transport metadata and four-player relay", lan, -1, 1);
     timeEndPeriod(1);
     if (failures) {
         printf("test_loopback: %d failures\n", failures);

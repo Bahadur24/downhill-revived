@@ -237,6 +237,8 @@ def project(libs, assets=None):
     for rel in ('gradlew', 'gradlew.bat', 'gradle/wrapper/gradle-wrapper.jar'):
         (PROJECT / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(template / rel, PROJECT / rel)
+        if rel == 'gradlew' and os.name != 'nt':
+            (PROJECT / rel).chmod(0o755)
     (PROJECT / 'gradle' / 'wrapper' / 'gradle-wrapper.properties').write_text(
         'distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\n'
         'distributionUrl=https\\://services.gradle.org/distributions/gradle-%s-all.zip\n'

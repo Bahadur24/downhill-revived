@@ -235,12 +235,13 @@ def c_tools(triple):
     if triple == ANDROID:
         import sdl3
         try:
-            bin_dir = sdl3.android_ndk() / 'toolchains' / 'llvm' / 'prebuilt' / 'windows-x86_64' / 'bin'
+            bin_dir = sdl3.android_toolchain_bin()
         except SystemExit as why:
             refuse(str(why))
+        suffix = '.exe' if os.name == 'nt' else ''
         # -g0: ring's build asks clang for -g3, whose DWARF names the registry, the NDK and the
         # target dir; cc puts these flags last, so they win
-        return {'CC_' + var: str(bin_dir / 'clang.exe'), 'AR_' + var: str(bin_dir / 'llvm-ar.exe'),
+        return {'CC_' + var: str(bin_dir / ('clang' + suffix)), 'AR_' + var: str(bin_dir / ('llvm-ar' + suffix)),
                 'CFLAGS_' + var: '-g0'}
     if triple in (LINUX, MAC) and os.name != 'nt':
         # the machine's own compiler (cc finds it; Apple's through xcrun, with the SDK ring needs),

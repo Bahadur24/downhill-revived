@@ -38,7 +38,11 @@ pub mod submitter {
 
     /// `run(call, arg, context)`: runs `call(arg)` on the render thread (or right here when that
     /// thread is the caller or gone) and returns once it has run.
-    pub type Run = unsafe extern "C" fn(call: unsafe extern "C" fn(*mut c_void), arg: *mut c_void, context: *mut c_void);
+    pub type Run = unsafe extern "C" fn(
+        call: unsafe extern "C" fn(*mut c_void),
+        arg: *mut c_void,
+        context: *mut c_void,
+    );
 
     struct Submitter {
         run: Run,
@@ -52,7 +56,8 @@ pub mod submitter {
     /// Registers (or with `run` NULL, removes) the thread exact submits run on.
     #[no_mangle]
     pub unsafe extern "C" fn dhdr_exact_set_submitter(run: Option<Run>, context: *mut c_void) {
-        *SUBMITTER.lock().unwrap_or_else(|p| p.into_inner()) = run.map(|run| Submitter { run, context });
+        *SUBMITTER.lock().unwrap_or_else(|p| p.into_inner()) =
+            run.map(|run| Submitter { run, context });
     }
 
     unsafe extern "C" fn trampoline(arg: *mut c_void) {
@@ -71,7 +76,13 @@ pub mod submitter {
         };
         let mut job = job;
         // SAFETY: `run` returns only after the call has run; `job` outlives it.
-        unsafe { run(trampoline, &mut job as *mut &mut dyn FnMut() as *mut c_void, context) };
+        unsafe {
+            run(
+                trampoline,
+                &mut job as *mut &mut dyn FnMut() as *mut c_void,
+                context,
+            )
+        };
     }
 }
 
@@ -89,7 +100,12 @@ pub struct Encoder {
 
 impl Encoder {
     pub fn new() -> Encoder {
-        Encoder { pass: None, encoder: None, last: None, frame: None }
+        Encoder {
+            pass: None,
+            encoder: None,
+            last: None,
+            frame: None,
+        }
     }
 
     /// Ends the open compute pass, if any.
@@ -101,17 +117,26 @@ impl Encoder {
     /// passes go after what was recorded.
     pub fn encoder(&mut self, gpu: &Gpu) -> &mut wgpu::CommandEncoder {
         self.end_pass();
-        self.encoder
-            .get_or_insert_with(|| gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default()))
+        self.encoder.get_or_insert_with(|| {
+            gpu.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default())
+        })
     }
 
     /// The open compute pass with `main` set (opened, and main set, if needed).
-    pub fn pass(&mut self, gpu: &Gpu, main: &wgpu::ComputePipeline) -> &mut wgpu::ComputePass<'static> {
+    pub fn pass(
+        &mut self,
+        gpu: &Gpu,
+        main: &wgpu::ComputePipeline,
+    ) -> &mut wgpu::ComputePass<'static> {
         if self.pass.is_none() {
-            let encoder = self
-                .encoder
-                .get_or_insert_with(|| gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default()));
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default()).forget_lifetime();
+            let encoder = self.encoder.get_or_insert_with(|| {
+                gpu.device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor::default())
+            });
+            let mut pass = encoder
+                .begin_compute_pass(&wgpu::ComputePassDescriptor::default())
+                .forget_lifetime();
             pass.set_pipeline(main);
             self.pass = Some(pass);
         }
@@ -119,9 +144,17 @@ impl Encoder {
     }
 
     /// One dispatch of `pipeline` with `group` in a compute pass of its own, after the open pass.
-    pub fn dispatch_alone(&mut self, gpu: &Gpu, pipeline: &wgpu::ComputePipeline, group: &wgpu::BindGroup, x: u32,
-                          y: u32) {
-        let mut pass = self.encoder(gpu).begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+    pub fn dispatch_alone(
+        &mut self,
+        gpu: &Gpu,
+        pipeline: &wgpu::ComputePipeline,
+        group: &wgpu::BindGroup,
+        x: u32,
+        y: u32,
+    ) {
+        let mut pass = self
+            .encoder(gpu)
+            .begin_compute_pass(&wgpu::ComputePassDescriptor::default());
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, group, &[]);
         pass.dispatch_workgroups(x, y, 1);
@@ -181,9 +214,13 @@ impl Exact {
     /// `dhdr_exact_copy`
     pub fn copy(&mut self, from: u32, from_offset: u32, to: u32, to_offset: u32, bytes: u32) {
         let (src, dst) = (self.buffers.get(from), self.buffers.get(to));
-        self.encoder
-            .encoder(self.gpu)
-            .copy_buffer_to_buffer(src, from_offset as u64, dst, to_offset as u64, Some(bytes as u64));
+        self.encoder.encoder(self.gpu).copy_buffer_to_buffer(
+            src,
+            from_offset as u64,
+            dst,
+            to_offset as u64,
+            Some(bytes as u64),
+        );
         self.stats.copies += 1;
     }
 
@@ -199,23 +236,43 @@ impl Exact {
     pub fn record(&mut self, pipeline: u32, x_word: u32, y_word: u32) {
         match pipeline {
             DHDR_P_LOCAL_COPY => {
-                self.encoder.dispatch_alone(self.gpu, &self.pipelines.local_copy, &self.buffers.copy_group, x_word,
-                                            y_word);
+                self.encoder.dispatch_alone(
+                    self.gpu,
+                    &self.pipelines.local_copy,
+                    &self.buffers.copy_group,
+                    x_word,
+                    y_word,
+                );
             }
             DHDR_P_SCANOUT => {
                 let (width, height) = (x_word >> 16, y_word >> 16);
-                if let Err(e) = self.display.ensure(self.gpu, &self.pipelines, &self.buffers, width, height) {
+                if let Err(e) =
+                    self.display
+                        .ensure(self.gpu, &self.pipelines, &self.buffers, width, height)
+                {
                     // The scanout is dropped (logged); op_record (gpu_rust_shared.inc) still reports 1.
-                    crate::host::log(&format!("dhd_render: dhdr_exact_record: display {width} x {height}: {e}"));
+                    crate::host::log(&format!(
+                        "dhd_render: dhdr_exact_record: display {width} x {height}: {e}"
+                    ));
                     return;
                 }
                 let Some(group) = self.display.scanout_group() else {
-                    crate::host::log(&format!("dhd_render: dhdr_exact_record: no scanout group at {width} x {height}"));
+                    crate::host::log(&format!(
+                        "dhd_render: dhdr_exact_record: no scanout group at {width} x {height}"
+                    ));
                     return;
                 };
-                self.encoder.dispatch_alone(self.gpu, &self.pipelines.scanout, group, x_word & 0xFFFF, y_word & 0xFFFF);
+                self.encoder.dispatch_alone(
+                    self.gpu,
+                    &self.pipelines.scanout,
+                    group,
+                    x_word & 0xFFFF,
+                    y_word & 0xFFFF,
+                );
             }
-            _ => crate::guard::fatal(&format!("dhd_render: dhdr_exact_record: pipeline {pipeline} is not a DHDR_P_* number")),
+            _ => crate::guard::fatal(&format!(
+                "dhd_render: dhdr_exact_record: pipeline {pipeline} is not a DHDR_P_* number"
+            )),
         }
         self.stats.dispatches += 1;
     }
@@ -235,7 +292,10 @@ impl Exact {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(index) = previous {
             let _spike = crate::native::pipelines::SpikeTimer::new("frame", 0);
-            let wait = wgpu::PollType::Wait { submission_index: Some(index), timeout: None };
+            let wait = wgpu::PollType::Wait {
+                submission_index: Some(index),
+                timeout: None,
+            };
             if let Err(e) = self.gpu.device.poll(wait) {
                 crate::host::log(&format!("dhd_render: exact frame_end: poll: {e}"));
             }

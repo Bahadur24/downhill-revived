@@ -33,16 +33,17 @@ pub unsafe extern "C" fn dhd_disc_check(
 ) -> c_int {
     // SAFETY: the caller's contract.
     let (iso, cache) = unsafe { (text(iso), text(cache)) };
-    let (code, said) = match iso.map(|p| crate::check(cache.map(Path::new), Path::new(p), |_, _| true)) {
-        None => (-1, "no disc image".to_string()),
-        Some(Ok((files, from_cache))) => {
-            // SAFETY: room for 32 bytes.
-            unsafe { std::ptr::copy_nonoverlapping(files.sha256.as_ptr(), digest, 32) };
-            (if from_cache { 2 } else { 1 }, files.note())
-        }
-        Some(Err(e @ crate::Error::Format(_))) => (-2, e.to_string()),
-        Some(Err(e)) => (-1, e.to_string()),
-    };
+    let (code, said) =
+        match iso.map(|p| crate::check(cache.map(Path::new), Path::new(p), |_, _| true)) {
+            None => (-1, "no disc image".to_string()),
+            Some(Ok((files, from_cache))) => {
+                // SAFETY: room for 32 bytes.
+                unsafe { std::ptr::copy_nonoverlapping(files.sha256.as_ptr(), digest, 32) };
+                (if from_cache { 2 } else { 1 }, files.note())
+            }
+            Some(Err(e @ crate::Error::Format(_))) => (-2, e.to_string()),
+            Some(Err(e)) => (-1, e.to_string()),
+        };
     if !note.is_null() && size > 0 {
         let n = said.floor_char_boundary(size - 1);
         // SAFETY: room for size bytes; n < size.

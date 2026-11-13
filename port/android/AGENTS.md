@@ -10,9 +10,11 @@ The root and `port/AGENTS.md` rules apply. Design: findings 091, 143; phones' sp
 - The release key never enters the repository: the `DHD_ANDROID_*` variables name the keystore
   outside the checkout and its passwords. The release check pins the release certificate;
   changing the key needs `--new-signing-key` on purpose (finding 143).
-- Online on phones is P2P rooms only (`host_service_net_offered`, findings 180, 186): Create A P2P
-  Race and Join With A Code; SFU rooms (public lists, Quick Race) are refused. Do not offer them
-  without a decision (root AGENTS.md, current decisions).
+- Network rooms on phones are online P2P rooms plus offline local-LAN rooms (`host_service_net_offered`,
+  findings 180, 186, 199): Create A P2P Race and Join With A Code still use the online service;
+  Host A LAN Race / Join A LAN Race connect over a private IPv4 address on the same network. SFU
+  rooms (public lists, Quick Race) remain refused. Do not offer them without a decision (root
+  AGENTS.md, current decisions).
 - A phone has no launcher: the game copies the disc chosen in the document picker on first start
   (on a worker thread), checks once a day for a newer release and only shows a notice.
 - The surface's formats are fixed (RGBA8, no format query; finding 145).

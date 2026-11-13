@@ -1,6 +1,6 @@
 //! A small host overlay, drawn after the game picture in surface pixels.
-use crate::device::Gpu;
 use super::font8x8;
+use crate::device::Gpu;
 
 /// The overlay's text texture over the corner of the surface.
 pub(crate) const SHADER: &str = r#"
@@ -55,9 +55,20 @@ impl Counter {
         }
     }
 
-    pub fn draw(&mut self, gpu: &Gpu, target: &wgpu::TextureView, format: wgpu::TextureFormat, w: u32, h: u32) {
-        if !self.enabled { return; }
-        let o = self.objects.get_or_insert_with(|| Objects::new(gpu, format));
+    pub fn draw(
+        &mut self,
+        gpu: &Gpu,
+        target: &wgpu::TextureView,
+        format: wgpu::TextureFormat,
+        w: u32,
+        h: u32,
+    ) {
+        if !self.enabled {
+            return;
+        }
+        let o = self
+            .objects
+            .get_or_insert_with(|| Objects::new(gpu, format));
         // The numbers change twice a second at most: the bitmap is written again only then.
         if self.shown != Some((self.fps, self.online)) {
             self.shown = Some((self.fps, self.online));
@@ -68,21 +79,44 @@ impl Counter {
         let margin = (4 * scale).min(w / 4).min(h / 4);
         let vw = W * scale;
         let vh = H * scale;
-        if vw + margin > w || vh + margin > h { return; }
-        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("performance counter") });
+        if vw + margin > w || vh + margin > h {
+            return;
+        }
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("performance counter"),
+            });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("performance counter"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: target, depth_slice: None, resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store } })],
-                depth_stencil_attachment: None, timestamp_writes: None, occlusion_query_set: None, multiview_mask: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
             });
             pass.set_pipeline(&o.pipe);
             pass.set_bind_group(0, &o.group, &[]);
             // Draw the whole fixed texture; transparent unused pixels cost no background.
             let full_w = W * scale;
             let full_h = H * scale;
-            pass.set_viewport((w - margin - vw) as f32, margin as f32, full_w as f32, full_h as f32, 0.0, 1.0);
+            pass.set_viewport(
+                (w - margin - vw) as f32,
+                margin as f32,
+                full_w as f32,
+                full_h as f32,
+                0.0,
+                1.0,
+            );
             pass.set_scissor_rect(w - margin - vw, margin, vw, vh);
             pass.draw(0..3, 0..1);
         }
@@ -101,9 +135,14 @@ impl Counter {
 fn lines(fps: u32, online: [i32; 3]) -> Vec<String> {
     let [server, race, riders] = online;
     let mut out = vec![format!("{} FPS", fps.min(99999))];
-    if server >= 0 { out.push(format!("SERVER {} MS", server.min(999))); }
-    if riders >= 0 { out.push(format!("RIDERS {} MS", riders.min(999))); }
-    else if race >= 0 { out.push(format!("RACE {} MS", race.min(999))); }
+    if server >= 0 {
+        out.push(format!("SERVER {} MS", server.min(999)));
+    }
+    if riders >= 0 {
+        out.push(format!("RIDERS {} MS", riders.min(999)));
+    } else if race >= 0 {
+        out.push(format!("RACE {} MS", race.min(999)));
+    }
     out
 }
 
@@ -113,43 +152,113 @@ impl Objects {
         let height = (lines.len() as u32 * 10 + 2).min(H);
         let xoff = W - width;
         let mut pixels = vec![0u8; (W * H * 4) as usize];
-        for y in 0..height { for x in 0..width {
-            pixels[(y * W + x + xoff) as usize * 4 + 3] = 180;
-        }}
+        for y in 0..height {
+            for x in 0..width {
+                pixels[(y * W + x + xoff) as usize * 4 + 3] = 180;
+            }
+        }
         for (line, text) in lines.iter().enumerate() {
             for (col, ch) in text.bytes().enumerate() {
                 let glyph = font8x8::glyph(ch);
-                for (y, row) in glyph.iter().enumerate() { for x in 0..8 {
-                    if row & (1 << x) != 0 {
-                        let at = ((line * 10 + y + 2) * W as usize + col * 8 + x + 2 + xoff as usize) * 4;
-                        pixels[at..at+4].fill(255);
+                for (y, row) in glyph.iter().enumerate() {
+                    for x in 0..8 {
+                        if row & (1 << x) != 0 {
+                            let at = ((line * 10 + y + 2) * W as usize
+                                + col * 8
+                                + x
+                                + 2
+                                + xoff as usize)
+                                * 4;
+                            pixels[at..at + 4].fill(255);
+                        }
                     }
-                }}
+                }
             }
         }
-        gpu.queue.write_texture(wgpu::TexelCopyTextureInfo { texture: &self.texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-            &pixels, wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(W * 4), rows_per_image: Some(H) },
-            wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 });
+        gpu.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &pixels,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(W * 4),
+                rows_per_image: Some(H),
+            },
+            wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 
     fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
-        let shader = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("performance counter"),
-                                                                                  source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
-        let pipe = gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("performance counter"), layout: None,
-            vertex: wgpu::VertexState { module: &shader, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
-            fragment: Some(wgpu::FragmentState { module: &shader, entry_point: Some("fs"), compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format, blend: Some(wgpu::BlendState::ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })] }),
-            primitive: Default::default(), depth_stencil: None, multisample: Default::default(), multiview_mask: None, cache: None,
-        });
+        let shader = gpu
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("performance counter"),
+                source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            });
+        let pipe = gpu
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("performance counter"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            });
         let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("performance counter"), size: wgpu::Extent3d { width: W, height: H, depth_or_array_layers: 1 },
-            mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2, format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST, view_formats: &[],
+            label: Some("performance counter"),
+            size: wgpu::Extent3d {
+                width: W,
+                height: H,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
         });
-        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some("performance counter"), layout: &pipe.get_bind_group_layout(0),
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&texture.create_view(&Default::default())) }] });
-        Self { pipe, texture, group }
+        let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("performance counter"),
+            layout: &pipe.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(
+                    &texture.create_view(&Default::default()),
+                ),
+            }],
+        });
+        Self {
+            pipe,
+            texture,
+            group,
+        }
     }
 }
 
@@ -157,24 +266,45 @@ impl Objects {
 // diagnostic image; DHD_CAPTURE_PRESENTED names a PNG prefix for this host image.
 #[cfg(feature = "native")]
 #[derive(Default)]
-pub struct Capture { start: Option<std::time::Instant>, saved: u32 }
+pub struct Capture {
+    start: Option<std::time::Instant>,
+    saved: u32,
+}
 #[cfg(feature = "native")]
 impl Capture {
     pub fn frame(&mut self, gpu: &Gpu, frame: &wgpu::Texture) {
         // Read once: nothing sets them while the game runs, and each read scans the environment.
         static ENV: std::sync::OnceLock<Option<(String, f64, f64)>> = std::sync::OnceLock::new();
         let Some((prefix, at, interval)) = ENV.get_or_init(|| {
-            let prefix = std::env::var_os("DHD_CAPTURE_PRESENTED")?.to_string_lossy().into_owned();
-            let at = std::env::var("DHD_CAPTURE_AT").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(10.0);
-            let interval = std::env::var("DHD_CAPTURE_INTERVAL").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            let prefix = std::env::var_os("DHD_CAPTURE_PRESENTED")?
+                .to_string_lossy()
+                .into_owned();
+            let at = std::env::var("DHD_CAPTURE_AT")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(10.0);
+            let interval = std::env::var("DHD_CAPTURE_INTERVAL")
+                .ok()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
             Some((prefix, at, interval))
-        }) else { return };
+        }) else {
+            return;
+        };
         let (at, interval) = (*at, *interval);
-        let elapsed = self.start.get_or_insert_with(std::time::Instant::now).elapsed().as_secs_f64();
-        if (self.saved != 0 && interval <= 0.0) || elapsed < at + self.saved as f64 * interval { return; }
+        let elapsed = self
+            .start
+            .get_or_insert_with(std::time::Instant::now)
+            .elapsed()
+            .as_secs_f64();
+        if (self.saved != 0 && interval <= 0.0) || elapsed < at + self.saved as f64 * interval {
+            return;
+        }
         let path = format!("{}-{:03}.png", prefix, self.saved);
         self.saved += 1;
-        if let Err(e) = capture_png(gpu, frame, &path) { crate::host::log(&format!("present capture: {e}")); }
+        if let Err(e) = capture_png(gpu, frame, &path) {
+            crate::host::log(&format!("present capture: {e}"));
+        }
     }
 }
 #[cfg(feature = "native")]
@@ -182,29 +312,70 @@ fn capture_png(gpu: &Gpu, frame: &wgpu::Texture, path: &str) -> Result<(), Strin
     let (w, h) = (frame.width(), frame.height());
     let stride = (w as u64 * 4 + 255) & !255;
     let size = stride * h as u64;
-    let read = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("present capture"), size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+    let read = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("present capture"),
+        size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
     let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo { texture: frame, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
-        wgpu::TexelCopyBufferInfo { buffer: &read, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(stride as u32), rows_per_image: Some(h) } },
-        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: frame,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &read,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(stride as u32),
+                rows_per_image: Some(h),
+            },
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+    );
     gpu.queue.submit([encoder.finish()]);
     let status = std::sync::Arc::new(std::sync::Mutex::new(None));
     let result = status.clone();
-    read.map_async(wgpu::MapMode::Read, .., move |r| *result.lock().unwrap() = Some(r));
-    gpu.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
-    status.lock().unwrap().take().ok_or("no capture callback")?.map_err(|e| e.to_string())?;
+    read.map_async(wgpu::MapMode::Read, .., move |r| {
+        *result.lock().unwrap() = Some(r)
+    });
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| e.to_string())?;
+    status
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or("no capture callback")?
+        .map_err(|e| e.to_string())?;
     let bytes = read.get_mapped_range(..);
     let mut pixels = Vec::with_capacity(w as usize * h as usize * 4);
-    for row in bytes.chunks_exact(stride as usize) { pixels.extend_from_slice(&row[..w as usize * 4]); }
+    for row in bytes.chunks_exact(stride as usize) {
+        pixels.extend_from_slice(&row[..w as usize * 4]);
+    }
     drop(bytes);
     read.unmap();
-    if frame.format() == wgpu::TextureFormat::Bgra8Unorm { for p in pixels.chunks_exact_mut(4) { p.swap(0, 2); } }
+    if frame.format() == wgpu::TextureFormat::Bgra8Unorm {
+        for p in pixels.chunks_exact_mut(4) {
+            p.swap(0, 2);
+        }
+    }
     let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), w, h);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    encoder.write_header().map_err(|e| e.to_string())?.write_image_data(&pixels).map_err(|e| e.to_string())?;
+    encoder
+        .write_header()
+        .map_err(|e| e.to_string())?
+        .write_image_data(&pixels)
+        .map_err(|e| e.to_string())?;
     crate::host::log(&format!("present capture: {path}"));
     Ok(())
 }
@@ -216,19 +387,39 @@ mod tests {
     #[test]
     fn online_lines_name_what_they_measure_and_fit() {
         // in a room: the server's round trip and the race network's (finding 181)
-        assert_eq!(lines(144, [180, 40, -1]), ["144 FPS", "SERVER 180 MS", "RACE 40 MS"]);
+        assert_eq!(
+            lines(144, [180, 40, -1]),
+            ["144 FPS", "SERVER 180 MS", "RACE 40 MS"]
+        );
         // in a race: the server's, then the riders' delay (finding 169)
-        assert_eq!(lines(60, [180, 40, 38]), ["60 FPS", "SERVER 180 MS", "RIDERS 38 MS"]);
+        assert_eq!(
+            lines(60, [180, 40, 38]),
+            ["60 FPS", "SERVER 180 MS", "RIDERS 38 MS"]
+        );
         // before the race network answers, without a server ping, in no room
         assert_eq!(lines(60, [21, -1, -1]), ["60 FPS", "SERVER 21 MS"]);
         assert_eq!(lines(60, [-1, 30, -1]), ["60 FPS", "RACE 30 MS"]);
         assert_eq!(lines(60, [-1, -1, -1]), ["60 FPS"]);
         assert_eq!(lines(60, [5000, -1, -1])[1], "SERVER 999 MS");
-        for online in [[123_456, 123_456, 123_456], [123_456, 123_456, -1], [1000, 1000, -1]] {
+        for online in [
+            [123_456, 123_456, 123_456],
+            [123_456, 123_456, -1],
+            [1000, 1000, -1],
+        ] {
             let l = lines(999_999, online);
-            assert!(l.len() as u32 * 10 + 2 <= super::H, "{l:?}: more lines than the bitmap holds");
-            for line in &l[1..] { assert!(line.len() <= 13, "{line}: more than 13 characters"); }
-            for line in &l { assert!(line.len() as u32 * 8 + 4 <= super::W, "{line} is wider than the bitmap"); }
+            assert!(
+                l.len() as u32 * 10 + 2 <= super::H,
+                "{l:?}: more lines than the bitmap holds"
+            );
+            for line in &l[1..] {
+                assert!(line.len() <= 13, "{line}: more than 13 characters");
+            }
+            for line in &l {
+                assert!(
+                    line.len() as u32 * 8 + 4 <= super::W,
+                    "{line} is wider than the bitmap"
+                );
+            }
         }
     }
 }

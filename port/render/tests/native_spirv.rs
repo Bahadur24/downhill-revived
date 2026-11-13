@@ -44,15 +44,36 @@ struct Device {
 
 impl Device {
     fn folder(&self) -> String {
-        format!("spv{}{}{}", self.lang_version.0, self.lang_version.1, if self.robust_image_access { "-robust" } else { "" })
+        format!(
+            "spv{}{}{}",
+            self.lang_version.0,
+            self.lang_version.1,
+            if self.robust_image_access {
+                "-robust"
+            } else {
+                ""
+            }
+        )
     }
 }
 
 /// The devices written for: a Vulkan 1.3 Mali with and without robustness, a Vulkan 1.1 one.
 const DEVICES: [Device; 3] = [
-    Device { lang_version: (1, 6), robust_buffer_access2: true, robust_image_access: true },
-    Device { lang_version: (1, 6), robust_buffer_access2: false, robust_image_access: false },
-    Device { lang_version: (1, 3), robust_buffer_access2: false, robust_image_access: false },
+    Device {
+        lang_version: (1, 6),
+        robust_buffer_access2: true,
+        robust_image_access: true,
+    },
+    Device {
+        lang_version: (1, 6),
+        robust_buffer_access2: false,
+        robust_image_access: false,
+    },
+    Device {
+        lang_version: (1, 3),
+        robust_buffer_access2: false,
+        robust_image_access: false,
+    },
 ];
 
 /// wgpu-hal's `naga_options` for a device with none of the optional features the renderer asks
@@ -73,7 +94,11 @@ fn options(device: Device, binding_map: spv::BindingMap) -> spv::Options<'static
         C::SampleRateShading,
     ];
     let policy = |unchecked: bool| {
-        if unchecked { naga::proc::BoundsCheckPolicy::Unchecked } else { naga::proc::BoundsCheckPolicy::Restrict }
+        if unchecked {
+            naga::proc::BoundsCheckPolicy::Unchecked
+        } else {
+            naga::proc::BoundsCheckPolicy::Restrict
+        }
     };
     spv::Options {
         lang_version: device.lang_version,
@@ -92,7 +117,10 @@ fn options(device: Device, binding_map: spv::BindingMap) -> spv::Options<'static
         fake_missing_bindings: false,
         binding_map,
         debug_info: None,
-        task_dispatch_limits: Some(naga::back::TaskDispatchLimits { max_mesh_workgroups_per_dim: 0, max_mesh_workgroups_total: 0 }),
+        task_dispatch_limits: Some(naga::back::TaskDispatchLimits {
+            max_mesh_workgroups_per_dim: 0,
+            max_mesh_workgroups_total: 0,
+        }),
         mesh_shader_primitive_indices_clamp: true,
     }
 }
@@ -105,8 +133,14 @@ fn binding_map(groups: &[&[u32]]) -> spv::BindingMap {
     for (group, bindings) in groups.iter().enumerate() {
         let group = group as u32;
         for (index, &binding) in bindings.iter().enumerate() {
-            map.insert(naga::ResourceBinding { group, binding },
-                       spv::BindingInfo { descriptor_set: group, binding: index as u32, binding_array_size: None });
+            map.insert(
+                naga::ResourceBinding { group, binding },
+                spv::BindingInfo {
+                    descriptor_set: group,
+                    binding: index as u32,
+                    binding_array_size: None,
+                },
+            );
         }
     }
     map
@@ -148,8 +182,19 @@ const RASTER_SCANOUT: &[&[u32]] = &[&[1, 5, 7]];
 const RASTER_LOCAL_COPY: &[&[u32]] = &[&[2, 6]];
 
 impl Stage {
-    fn new(source: Source, stage: naga::ShaderStage, entry: &'static str, groups: &'static [&'static [u32]]) -> Stage {
-        Stage { source, stage, entry, constants: Vec::new(), groups }
+    fn new(
+        source: Source,
+        stage: naga::ShaderStage,
+        entry: &'static str,
+        groups: &'static [&'static [u32]],
+    ) -> Stage {
+        Stage {
+            source,
+            stage,
+            entry,
+            constants: Vec::new(),
+            groups,
+        }
     }
 
     fn file_name(&self) -> String {
@@ -192,28 +237,71 @@ fn stages() -> Vec<Stage> {
         Stage::new(Native, Fragment, "native_grow_depth", &[ONE, ONE]),
         Stage::new(Native, Compute, "native_scanout", TWO),
         Stage::new(Native, Compute, "native_scanout_fast", TWO),
-        Stage::new(Native, Compute, "native_convert", &[ONE, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]),
+        Stage::new(
+            Native,
+            Compute,
+            "native_convert",
+            &[ONE, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]],
+        ),
         Stage::new(Native, Vertex, "native_vertex", TWO),
         Stage::new(Native, Vertex, "native_mesh_vertex", MESH),
         Stage::new(Raster, Compute, "scanout", RASTER_SCANOUT),
     ];
     // exact/pipelines.rs build_keyed: main takes the three flags of the key, local_copy the shift.
     for key in 0..8u32 {
-        use dhd_render::abi::{DHDR_RASTER_ADDRESS_SHIFT, DHDR_RASTER_EARLY_DEPTH, DHDR_RASTER_EXCLUSIVE_WORD_STORE};
+        use dhd_render::abi::{
+            DHDR_RASTER_ADDRESS_SHIFT, DHDR_RASTER_EARLY_DEPTH, DHDR_RASTER_EXCLUSIVE_WORD_STORE,
+        };
         let bit = |b: u32| if key & b != 0 { 1.0 } else { 0.0 };
-        let constants = vec![("EARLY_DEPTH", bit(DHDR_RASTER_EARLY_DEPTH)), ("ADDRESS_SHIFT", bit(DHDR_RASTER_ADDRESS_SHIFT)),
-                             ("EXCLUSIVE_WORD_STORE", bit(DHDR_RASTER_EXCLUSIVE_WORD_STORE))];
-        out.push(Stage { source: Raster, stage: Compute, entry: "main", constants, groups: RASTER_MAIN });
+        let constants = vec![
+            ("EARLY_DEPTH", bit(DHDR_RASTER_EARLY_DEPTH)),
+            ("ADDRESS_SHIFT", bit(DHDR_RASTER_ADDRESS_SHIFT)),
+            (
+                "EXCLUSIVE_WORD_STORE",
+                bit(DHDR_RASTER_EXCLUSIVE_WORD_STORE),
+            ),
+        ];
+        out.push(Stage {
+            source: Raster,
+            stage: Compute,
+            entry: "main",
+            constants,
+            groups: RASTER_MAIN,
+        });
     }
     for shift in [0.0, 1.0] {
-        out.push(Stage { source: Raster, stage: Compute, entry: "local_copy", constants: vec![("ADDRESS_SHIFT", shift)],
-                         groups: RASTER_LOCAL_COPY });
+        out.push(Stage {
+            source: Raster,
+            stage: Compute,
+            entry: "local_copy",
+            constants: vec![("ADDRESS_SHIFT", shift)],
+            groups: RASTER_LOCAL_COPY,
+        });
     }
     // Specialisations: each flag alone and in the common mixes, every CLAMP pair, every alpha test.
     let mut specs = vec![0u32];
     // 1 | 16 | 32 (with and without 2): textured, fogged, bilinear, the race's most drawn pixels (finding 174).
-    let flag_sets = [0u32, 1, 1 | 2, 1 | 2 | 4, 1 | 2 | 8, 1 | 2 | 12, 1 | 32, 1 | 16 | 32, 1 | 2 | 16 | 32, 1 | 2 | 32 | 64,
-                     16, 64, 64 | 128, 512, 1 | 256, 1 | 1024, 1 | 2048, 1 | 2 | 16 | 32 | 64 | 512 | 1024, 0xFFF];
+    let flag_sets = [
+        0u32,
+        1,
+        1 | 2,
+        1 | 2 | 4,
+        1 | 2 | 8,
+        1 | 2 | 12,
+        1 | 32,
+        1 | 16 | 32,
+        1 | 2 | 16 | 32,
+        1 | 2 | 32 | 64,
+        16,
+        64,
+        64 | 128,
+        512,
+        1 | 256,
+        1 | 1024,
+        1 | 2048,
+        1 | 2 | 16 | 32 | 64 | 512 | 1024,
+        0xFFF,
+    ];
     for &f in &flag_sets {
         for sized in [false, true] {
             specs.push(pipelines::spec(f, [0, 0], 0, sized, true));
@@ -258,7 +346,13 @@ fn stages() -> Vec<Stage> {
                 if spec != 0 {
                     constants.push(("native_spec", spec as f64));
                 }
-                out.push(Stage { source, stage: Fragment, entry, constants, groups: TWO });
+                out.push(Stage {
+                    source,
+                    stage: Fragment,
+                    entry,
+                    constants,
+                    groups: TWO,
+                });
             }
         }
     }
@@ -266,24 +360,46 @@ fn stages() -> Vec<Stage> {
 }
 
 fn parse(source: &str) -> (naga::Module, naga::valid::ModuleInfo) {
-    let module = naga::front::wgsl::parse_str(source).unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
-    let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-        .validate(&module)
+    let module = naga::front::wgsl::parse_str(source)
         .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
+    let info = naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)));
     (module, info)
 }
 
 /// The SPIR-V words of one stage, as compile_stage makes them.
-fn spirv(module: &naga::Module, info: &naga::valid::ModuleInfo, s: &Stage, device: Device) -> Vec<u32> {
+fn spirv(
+    module: &naga::Module,
+    info: &naga::valid::ModuleInfo,
+    s: &Stage,
+    device: Device,
+) -> Vec<u32> {
     let mut constants = naga::back::PipelineConstants::default();
     for (k, v) in &s.constants {
         constants.insert(k.to_string(), *v);
     }
-    let (module, info) = naga::back::pipeline_constants::process_overrides(module, info, Some((s.stage, s.entry)), &constants)
-        .unwrap_or_else(|e| panic!("{}: overrides: {e}", s.file_name()));
-    let pipeline = spv::PipelineOptions { shader_stage: s.stage, entry_point: s.entry.to_string() };
-    spv::write_vec(&module, &info, &options(device, binding_map(s.groups)), Some(&pipeline))
-        .unwrap_or_else(|e| panic!("{}: SPIR-V: {e}", s.file_name()))
+    let (module, info) = naga::back::pipeline_constants::process_overrides(
+        module,
+        info,
+        Some((s.stage, s.entry)),
+        &constants,
+    )
+    .unwrap_or_else(|e| panic!("{}: overrides: {e}", s.file_name()));
+    let pipeline = spv::PipelineOptions {
+        shader_stage: s.stage,
+        entry_point: s.entry.to_string(),
+    };
+    spv::write_vec(
+        &module,
+        &info,
+        &options(device, binding_map(s.groups)),
+        Some(&pipeline),
+    )
+    .unwrap_or_else(|e| panic!("{}: SPIR-V: {e}", s.file_name()))
 }
 
 /// The function parameters of `words` that are an image or a sampler, or a pointer to one
@@ -300,7 +416,10 @@ fn handle_parameters(words: &[u32]) -> usize {
     let mut i = 5; // after the header
     while i < words.len() {
         let (op, len) = (words[i] & 0xFFFF, (words[i] >> 16) as usize);
-        assert!(len > 0 && i + len <= words.len(), "SPIR-V instruction at word {i}: length {len}");
+        assert!(
+            len > 0 && i + len <= words.len(),
+            "SPIR-V instruction at word {i}: length {len}"
+        );
         let operand = |k: usize| words[i + k];
         match op {
             TYPE_IMAGE | TYPE_SAMPLER | TYPE_SAMPLED_IMAGE => {
@@ -337,14 +456,28 @@ fn llvm_saturating_forms(words: &[u32]) -> Vec<String> {
     const SHIFT_LEFT_LOGICAL: u32 = 196;
     const BITWISE_OR: u32 = 197;
     // Each result id's opcode and operands after the result id.
-    let mut defs: std::collections::HashMap<u32, (u32, Vec<u32>)> = std::collections::HashMap::new();
+    let mut defs: std::collections::HashMap<u32, (u32, Vec<u32>)> =
+        std::collections::HashMap::new();
     let mut i = 5;
     while i < words.len() {
         let (op, len) = (words[i] & 0xFFFF, (words[i] >> 16) as usize);
-        assert!(len > 0 && i + len <= words.len(), "SPIR-V instruction at word {i}: length {len}");
-        if [CONSTANT, CONSTANT_COMPOSITE, CONSTANT_NULL, LOAD, IADD, ISUB, SELECT, SHIFT_RIGHT_LOGICAL, SHIFT_LEFT_LOGICAL,
-            BITWISE_OR]
-            .contains(&op)
+        assert!(
+            len > 0 && i + len <= words.len(),
+            "SPIR-V instruction at word {i}: length {len}"
+        );
+        if [
+            CONSTANT,
+            CONSTANT_COMPOSITE,
+            CONSTANT_NULL,
+            LOAD,
+            IADD,
+            ISUB,
+            SELECT,
+            SHIFT_RIGHT_LOGICAL,
+            SHIFT_LEFT_LOGICAL,
+            BITWISE_OR,
+        ]
+        .contains(&op)
             || UNSIGNED_COMPARES.contains(&op)
         {
             // Result type, result id, operands.
@@ -356,7 +489,11 @@ fn llvm_saturating_forms(words: &[u32]) -> Vec<String> {
         Some((LOAD, operands)) => (LOAD, operands[0]),
         _ => (0, id),
     };
-    fn constant(defs: &std::collections::HashMap<u32, (u32, Vec<u32>)>, id: u32, want: u32) -> bool {
+    fn constant(
+        defs: &std::collections::HashMap<u32, (u32, Vec<u32>)>,
+        id: u32,
+        want: u32,
+    ) -> bool {
         match defs.get(&id) {
             Some((43, operands)) => operands.iter().all(|&w| w == want),
             Some((46, _)) => want == 0,
@@ -375,19 +512,28 @@ fn llvm_saturating_forms(words: &[u32]) -> Vec<String> {
         let (op, operands) = &defs[&id];
         match *op {
             SELECT => {
-                let Some((cmp, cmp_operands)) = defs.get(&operands[0]) else { continue };
+                let Some((cmp, cmp_operands)) = defs.get(&operands[0]) else {
+                    continue;
+                };
                 if !UNSIGNED_COMPARES.contains(cmp) {
                     continue;
                 }
                 for (arith, other) in [(operands[1], operands[2]), (operands[2], operands[1])] {
                     match defs.get(&arith) {
-                        Some((ISUB, sub)) if constant(&defs, other, 0) && same(sub, cmp_operands) => {
+                        Some((ISUB, sub))
+                            if constant(&defs, other, 0) && same(sub, cmp_operands) =>
+                        {
                             found.push(format!("%{id}: a select of a - b and 0 (llvm.usub.sat)"));
                         }
-                        Some((IADD, add)) if constant(&defs, other, u32::MAX)
-                            && add.iter().any(|&a| cmp_operands.iter().any(|&c| value(a) == value(c))) =>
+                        Some((IADD, add))
+                            if constant(&defs, other, u32::MAX)
+                                && add.iter().any(|&a| {
+                                    cmp_operands.iter().any(|&c| value(a) == value(c))
+                                }) =>
                         {
-                            found.push(format!("%{id}: a select of a + b and all ones (llvm.uadd.sat)"));
+                            found.push(format!(
+                                "%{id}: a select of a + b and all ones (llvm.uadd.sat)"
+                            ));
                         }
                         _ => {}
                     }
@@ -399,7 +545,10 @@ fn llvm_saturating_forms(words: &[u32]) -> Vec<String> {
                     _ => None,
                 };
                 for (a, b) in [(operands[0], operands[1]), (operands[1], operands[0])] {
-                    if let (Some(x), Some(y)) = (shifted(a, SHIFT_LEFT_LOGICAL), shifted(b, SHIFT_RIGHT_LOGICAL)) {
+                    if let (Some(x), Some(y)) = (
+                        shifted(a, SHIFT_LEFT_LOGICAL),
+                        shifted(b, SHIFT_RIGHT_LOGICAL),
+                    ) {
                         if x == y {
                             found.push(format!("%{id}: x << a | x >> b (llvm.fshl)"));
                         }
@@ -423,7 +572,11 @@ fn malioc(malioc: &Path, core: &str, file: &Path) -> Option<String> {
         .arg(file)
         .output()
         .unwrap_or_else(|e| panic!("{}: {e}", malioc.display()));
-    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     if out.status.success() && !text.contains("ERROR") {
         None
     } else {
@@ -448,25 +601,37 @@ fn llvm_saturating_forms_scan() {
             out[5] = select(0u, (a - b) | zero.w, a > b);
         }";
     let (module, info) = parse(source);
-    let stage = Stage { source: Source::Raster, stage: naga::ShaderStage::Compute, entry: "main", constants: Vec::new(),
-                        groups: &[&[0, 1]] };
+    let stage = Stage {
+        source: Source::Raster,
+        stage: naga::ShaderStage::Compute,
+        entry: "main",
+        constants: Vec::new(),
+        groups: &[&[0, 1]],
+    };
     let found = llvm_saturating_forms(&spirv(&module, &info, &stage, DEVICES[2]));
     let kinds = ["llvm.usub.sat", "llvm.uadd.sat", "llvm.fshl"];
     assert_eq!(found.len(), 3, "{found:#?}");
     for kind in kinds {
-        assert!(found.iter().any(|f| f.contains(kind)), "{kind} not found: {found:#?}");
+        assert!(
+            found.iter().any(|f| f.contains(kind)),
+            "{kind} not found: {found:#?}"
+        );
     }
 }
 
 #[test]
 fn native_spirv() {
     let read = |var: &str, default: &str| match std::env::var_os(var) {
-        Some(path) => std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", PathBuf::from(&path).display())),
+        Some(path) => std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: {e}", PathBuf::from(&path).display())),
         None => default.to_string(),
     };
     let other = std::env::var_os("DHD_NATIVE_WGSL").is_some();
     let native = read("DHD_NATIVE_WGSL", NATIVE);
-    let dual_source = format!("enable dual_source_blending;\n{native}{}", read("DHD_NATIVE_DUAL_WGSL", NATIVE_DUAL));
+    let dual_source = format!(
+        "enable dual_source_blending;\n{native}{}",
+        read("DHD_NATIVE_DUAL_WGSL", NATIVE_DUAL)
+    );
     let plain = parse(&native);
     let dual = parse(&dual_source);
     let present = parse(PRESENT);
@@ -477,7 +642,9 @@ fn native_spirv() {
     let core = std::env::var("DHD_MALIOC_CORE").unwrap_or_else(|_| "Mali-G57".into());
     let dir = out_dir.clone().or_else(|| {
         malioc_path.as_ref().map(|_| {
-            let scratch = std::env::var_os("DHD_SCRATCH").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+            let scratch = std::env::var_os("DHD_SCRATCH")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir);
             scratch.join(format!("dhd-native-spirv-{}", std::process::id()))
         })
     });
@@ -499,10 +666,20 @@ fn native_spirv() {
                 if !module.entry_points.iter().any(|e| e.name == s.entry) {
                     continue;
                 }
-                s.constants.retain(|(k, _)| module.overrides.iter().any(|(_, o)| o.name.as_deref() == Some(*k)));
+                s.constants.retain(|(k, _)| {
+                    module
+                        .overrides
+                        .iter()
+                        .any(|(_, o)| o.name.as_deref() == Some(*k))
+                });
             }
             let words = spirv(module, info, &s, device);
-            assert_eq!(words.first(), Some(&0x0723_0203), "{}: not SPIR-V", s.file_name());
+            assert_eq!(
+                words.first(),
+                Some(&0x0723_0203),
+                "{}: not SPIR-V",
+                s.file_name()
+            );
             written += 1;
             let handles = handle_parameters(&words);
             if handles != 0 {
@@ -532,25 +709,40 @@ fn native_spirv() {
                     let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let Some(file) = files.get(i) else { break };
                     if let Some(report) = malioc(malioc_path, &core, file) {
-                        found.lock().unwrap().push(format!("{}: {report}", file.display()));
+                        found
+                            .lock()
+                            .unwrap()
+                            .push(format!("{}: {report}", file.display()));
                     }
                 });
             }
         });
         failures = found.into_inner().unwrap();
-        eprintln!("native_spirv: malioc --core {core}: {} of {} stages compiled", files.len() - failures.len(), files.len());
+        eprintln!(
+            "native_spirv: malioc --core {core}: {} of {} stages compiled",
+            files.len() - failures.len(),
+            files.len()
+        );
         if out_dir.is_none() {
             if let Some(dir) = &dir {
                 let _ = std::fs::remove_dir_all(dir);
             }
         }
     }
-    assert!(with_handles.is_empty(), "stages that pass a texture or sampler into a function (Mali r54 crashes on them):\n{}",
-            with_handles.join("\n"));
+    assert!(
+        with_handles.is_empty(),
+        "stages that pass a texture or sampler into a function (Mali r54 crashes on them):\n{}",
+        with_handles.join("\n")
+    );
     assert!(llvm_forms.is_empty(),
             "stages with a form LLVM 9 turns into an intrinsic PowerVR Rogue's driver 1.13 crashes on (finding 170; \
              raster.wgsl's keep_u hides the arithmetic):\n{}",
             llvm_forms.join("\n"));
-    assert!(failures.is_empty(), "{} of {} stages do not compile for {core}:\n{}", failures.len(), files.len(),
-            failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "{} of {} stages do not compile for {core}:\n{}",
+        failures.len(),
+        files.len(),
+        failures.join("\n")
+    );
 }

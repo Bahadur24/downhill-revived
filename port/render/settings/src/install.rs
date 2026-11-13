@@ -14,7 +14,10 @@ pub const KEY: &str = "install_id";
 /// An install id: 32 lowercase hex digits (128 bits), the form the server takes
 /// (online/server/src/guard.ts installIdOf).
 pub fn valid(id: &str) -> bool {
-    id.len() == 32 && id.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
 }
 
 /// A new install id. The standard library has no public random source, so the bits come from
@@ -26,7 +29,9 @@ pub fn valid(id: &str) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 pub fn fresh() -> String {
     use std::hash::{BuildHasher, Hasher, RandomState};
-    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
     let mut id = String::with_capacity(32);
     for half in 0u8..2 {
         let mut h = RandomState::new().build_hasher();

@@ -52,7 +52,9 @@ pub(crate) fn tls_config() -> Result<Arc<ClientConfig>, String> {
     static CONFIG: OnceLock<Result<Arc<ClientConfig>, String>> = OnceLock::new();
     CONFIG
         .get_or_init(|| {
-            let roots = RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+            let roots = RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+            };
             ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
                 .with_safe_default_protocol_versions()
                 .map(|b| Arc::new(b.with_root_certificates(roots).with_no_client_auth()))
@@ -75,7 +77,11 @@ pub(crate) fn dial(host: &str, port: u16) -> io::Result<TcpStream> {
 
 /// Opens the stream to uri's host: secure when `secure`. Also returns a second handle of the socket.
 pub fn open(uri: &Uri, secure: bool) -> Result<(Stream, TcpStream), String> {
-    let host = uri.host().ok_or("no host in the URL")?.trim_start_matches('[').trim_end_matches(']');
+    let host = uri
+        .host()
+        .ok_or("no host in the URL")?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
     let port = uri.port_u16().unwrap_or(if secure { 443 } else { 80 });
     let tcp = dial(host, port).map_err(|e| format!("can't connect to {host} ({e})"))?;
     let _ = tcp.set_nodelay(true);
@@ -85,16 +91,22 @@ pub fn open(uri: &Uri, secure: bool) -> Result<(Stream, TcpStream), String> {
     if !secure {
         return Ok((Stream::Plain(tcp), handle));
     }
-    let name = ServerName::try_from(host.to_owned()).map_err(|_| format!("bad host name {host}"))?;
-    let conn = ClientConnection::new(tls_config()?, name).map_err(|e| format!("TLS error ({e})"))?;
+    let name =
+        ServerName::try_from(host.to_owned()).map_err(|_| format!("bad host name {host}"))?;
+    let conn =
+        ClientConnection::new(tls_config()?, name).map_err(|e| format!("TLS error ({e})"))?;
     Ok((Stream::Tls(Box::new(StreamOwned::new(conn, tcp))), handle))
 }
 
 /// The WebSocket at url (ws:// or wss://), its socket's handle and a third for peeking. On failure,
 /// why (the close reason ws.h passes for code -1).
 pub fn connect_ws(url: &str) -> Result<(WebSocket<Stream>, TcpStream, TcpStream), String> {
-    let mut request = url.into_client_request().map_err(|_| format!("bad URL {url}"))?;
-    request.headers_mut().insert(USER_AGENT, HeaderValue::from_static(AGENT));
+    let mut request = url
+        .into_client_request()
+        .map_err(|_| format!("bad URL {url}"))?;
+    request
+        .headers_mut()
+        .insert(USER_AGENT, HeaderValue::from_static(AGENT));
     let secure = match request.uri().scheme_str() {
         Some("wss") => true,
         Some("ws") => false,
@@ -108,7 +120,9 @@ pub fn connect_ws(url: &str) -> Result<(WebSocket<Stream>, TcpStream, TcpStream)
             let _ = tcp.set_read_timeout(Some(crate::PEEK));
             Ok((ws, tcp, peek))
         }
-        Err(HandshakeError::Failure(tungstenite::Error::Http(r))) => Err(format!("HTTP {} from {url}", r.status().as_u16())),
+        Err(HandshakeError::Failure(tungstenite::Error::Http(r))) => {
+            Err(format!("HTTP {} from {url}", r.status().as_u16()))
+        }
         Err(HandshakeError::Failure(e)) => Err(format!("can't connect to {url} ({e})")),
         Err(HandshakeError::Interrupted(_)) => Err(format!("can't connect to {url} (timed out)")),
     }

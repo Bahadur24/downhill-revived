@@ -96,10 +96,20 @@ fn corpus() -> String {
         // Nothing stored yet: a player's first start, where the launcher has made dhd.ini (`create`:
         // HEADER) before the game reads it. The browser, which has no launcher, stands for that; a
         // start without dhd.ini (the tools') is DHD_SETTINGS=none there.
-        let ini = Ini::parse(if c.stored { c.text } else { dhd_settings::HEADER.as_bytes() });
+        let ini = Ini::parse(if c.stored {
+            c.text
+        } else {
+            dhd_settings::HEADER.as_bytes()
+        });
         let env = environment(Some(&ini), |n| c.set.contains(&n));
         let saved = edited(c.stored.then_some(c.text), c.key, c.value).unwrap();
-        let vars = env.vars.iter().map(|(n, v)| format!("[{}, {}]", bytes_json(n.as_bytes()), bytes_json(v.as_bytes())));
+        let vars = env.vars.iter().map(|(n, v)| {
+            format!(
+                "[{}, {}]",
+                bytes_json(n.as_bytes()),
+                bytes_json(v.as_bytes())
+            )
+        });
         cases.push(format!(
             "  {{\n    \"name\": {},\n    \"text\": {},\n    \"stored\": {},\n    \"set\": {},\n    \"save\": [{}, {}],\n    \
              \"vars\": {},\n    \"unknown\": {},\n    \"saved\": {}\n  }}",
@@ -124,6 +134,11 @@ fn web_corpus_json_is_current() {
     if std::env::var_os("DHD_SETTINGS_BLESS").is_some() {
         std::fs::write(&path, &want).unwrap();
     }
-    let have = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
-    assert!(have == want, "tests/web_corpus.json is not the crate's: DHD_SETTINGS_BLESS=1 cargo test -p dhd_settings");
+    let have = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
+    assert!(
+        have == want,
+        "tests/web_corpus.json is not the crate's: DHD_SETTINGS_BLESS=1 cargo test -p dhd_settings"
+    );
 }

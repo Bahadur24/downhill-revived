@@ -184,9 +184,17 @@ Measured per platform and step in finding 151. What keeps a rebuild short:
 
 `python port/android/build_apk.py --wasm build/wasm/dhd_core.wasm` builds `libmain.so` with
 `port/tools/build_host64.py --target android-arm64` and a debug-signed APK, `build/android/downhill-revived-<version>-debug.apk`.
-It needs the Android SDK (`ANDROID_HOME`, platform android-35), an NDK (r29 tested), a JDK 17+
+It needs the Android SDK (`ANDROID_HOME`, platform android-35), an NDK (r27.2.12479018 built the
+current debug APK; r29 has also been tested), a JDK 17+
 (`JAVA_HOME`), the Rust target `aarch64-linux-android`, and `GRADLE_USER_HOME` and
 `ANDROID_USER_HOME` set (Gradle and the debug key). No Android Studio. Details and status: finding 091.
+
+On the in-progress `feature/android-lan` branch, the Android build also includes distinct Wi-Fi LAN
+and Tailscale room modes (finding 199). Tailnet play uses the Android Tailscale VPN and normal TCP
+sockets; both peers must be connected and permitted by the tailnet policy. The host manually enters
+their Tailscale IPv4 address and shares the displayed runtime TCP port; guests manually enter
+`IP:port`. The game does not enumerate Tailscale peers automatically. Building an APK does not
+validate a real two-device or two-home connection.
 
 The release APK (finding 143): `python port/android/build_apk.py --release --wasm build/wasm/dhd_core.wasm`
 builds the release build type (not debuggable, no R8), signed with the release key, which only
@@ -366,7 +374,9 @@ tools set `DHD_SETTINGS=none`) none of them apply. Tools that drive the game (`D
 
 Online play is not a setting: the host decides whether it is offered (`host_service_net_offered`,
 finding 143). The Windows, macOS and Linux builds offer it; the Android build and the browser
-don't (no ONLINE row, and `server`, `DHD_NET_*` or anything else can't start a session there).
+don't offer the server-backed ONLINE rooms (no ONLINE row, and `server`, `DHD_NET_*` or anything
+else can't start those sessions there). Android's separate Wi-Fi LAN and Tailscale room modes are
+documented in finding 199.
 On Android `auto_update = off` also turns off the once-a-day update notice.
 
 ## Releases

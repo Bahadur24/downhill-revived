@@ -113,7 +113,11 @@ impl Peer {
 
     /// `check_interval`: str0m's longest wait between ICE checks (its default, 3 s, when None);
     /// tests shorten it to see a lost path sooner.
-    fn with_check_interval(local: IpAddr, offerer: bool, check_interval: Option<Duration>) -> Result<Self> {
+    fn with_check_interval(
+        local: IpAddr,
+        offerer: bool,
+        check_interval: Option<Duration>,
+    ) -> Result<Self> {
         let mut config = Rtc::builder()
             .set_crypto_provider(str0m::crypto::from_feature_flags().into())
             .set_stats_interval(Some(STATS_INTERVAL));
@@ -127,11 +131,21 @@ impl Peer {
             udp.set_nonblocking(true)?;
             let local = udp.local_addr()?;
             rtc.add_local_candidate(Candidate::host(local, "udp")?);
-            sockets.push(Socket { udp, local, answer_only, heard: false });
+            sockets.push(Socket {
+                udp,
+                local,
+                answer_only,
+                heard: false,
+            });
         }
         let stun = match (!local.is_loopback(), STUN_SERVER.to_socket_addrs()) {
             (true, Ok(mut found)) => match found.find(|a| a.is_ipv4() == local.is_ipv4()) {
-                Some(server) => Some(Stun { server, id: random_id()?, next: Instant::now(), tries: 0 }),
+                Some(server) => Some(Stun {
+                    server,
+                    id: random_id()?,
+                    next: Instant::now(),
+                    tries: 0,
+                }),
                 None => None,
             },
             _ => None,
@@ -165,9 +179,21 @@ impl Peer {
             (state, events, None)
         };
         Ok(Self {
-            rtc, sockets, pending, state, events, stun, connected: false, lost_since: None, path: None,
-            created: Instant::now(), outgoing_events: VecDeque::new(), outgoing_states: HashMap::new(),
-            signals, incoming: vec![], refused: None,
+            rtc,
+            sockets,
+            pending,
+            state,
+            events,
+            stun,
+            connected: false,
+            lost_since: None,
+            path: None,
+            created: Instant::now(),
+            outgoing_events: VecDeque::new(),
+            outgoing_states: HashMap::new(),
+            signals,
+            incoming: vec![],
+            refused: None,
         })
     }
 
@@ -175,20 +201,36 @@ impl Peer {
     /// only which step failed: str0m's errors quote the text they could not take, and an offer or
     /// a candidate holds the other game's network addresses, which must not reach dhd.log.
     pub fn signal(&mut self, m: &Value) -> Result<()> {
-        let text = |key: &str, max: usize| m[key].as_str().filter(|s| s.len() <= max).ok_or("invalid peer signal");
+        let text = |key: &str, max: usize| {
+            m[key]
+                .as_str()
+                .filter(|s| s.len() <= max)
+                .ok_or("invalid peer signal")
+        };
         match m["type"].as_str() {
             Some("offer") => {
-                let offer = SdpOffer::from_sdp_string(text("sdp", MESSAGE_MAX)?).map_err(|_| "unreadable peer offer")?;
-                let answer = self.rtc.sdp_api().accept_offer(offer).map_err(|_| "peer offer refused")?;
-                self.signals.push(json!({"type": "answer", "sdp": answer.to_sdp_string()}));
+                let offer = SdpOffer::from_sdp_string(text("sdp", MESSAGE_MAX)?)
+                    .map_err(|_| "unreadable peer offer")?;
+                let answer = self
+                    .rtc
+                    .sdp_api()
+                    .accept_offer(offer)
+                    .map_err(|_| "peer offer refused")?;
+                self.signals
+                    .push(json!({"type": "answer", "sdp": answer.to_sdp_string()}));
             }
             Some("answer") => {
                 let pending = self.pending.take().ok_or("unexpected peer answer")?;
-                let answer = SdpAnswer::from_sdp_string(text("sdp", MESSAGE_MAX)?).map_err(|_| "unreadable peer answer")?;
-                self.rtc.sdp_api().accept_answer(pending, answer).map_err(|_| "peer answer refused")?;
+                let answer = SdpAnswer::from_sdp_string(text("sdp", MESSAGE_MAX)?)
+                    .map_err(|_| "unreadable peer answer")?;
+                self.rtc
+                    .sdp_api()
+                    .accept_answer(pending, answer)
+                    .map_err(|_| "peer answer refused")?;
             }
             Some("candidate") => {
-                let candidate = Candidate::from_sdp_string(text("candidate", 2048)?).map_err(|_| "unreadable peer candidate")?;
+                let candidate = Candidate::from_sdp_string(text("candidate", 2048)?)
+                    .map_err(|_| "unreadable peer candidate")?;
                 // Direct paths only: a relayed candidate (a browser's own TURN) is not taken.
                 if candidate.kind() != CandidateKind::Relayed {
                     self.rtc.add_remote_candidate(candidate);
@@ -227,7 +269,8 @@ impl Peer {
             if bytes.len() <= STATE_INDEX || bytes[STATE_SENDER] >= 10 || bytes[STATE_INDEX] >= 10 {
                 return Err("invalid peer state".into());
             }
-            self.outgoing_states.insert((bytes[STATE_SENDER], bytes[STATE_INDEX]), bytes);
+            self.outgoing_states
+                .insert((bytes[STATE_SENDER], bytes[STATE_INDEX]), bytes);
         }
         Ok(())
     }
@@ -242,7 +285,16 @@ impl Peer {
                 let (n, source) = match self.sockets[i].udp.recv_from(&mut buffer) {
                     Ok(got) => got,
                     // Windows reports an earlier send's ICMP error here; nothing to read now.
-                    Err(e) if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::Interrupted | ErrorKind::ConnectionReset) => break,
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            ErrorKind::WouldBlock
+                                | ErrorKind::Interrupted
+                                | ErrorKind::ConnectionReset
+                        ) =>
+                    {
+                        break
+                    }
                     Err(e) => return Err(e.into()),
                 };
                 if self.stun_answer(i, source, &buffer[..n])? {
@@ -259,30 +311,47 @@ impl Peer {
         if !self.rtc.is_alive() {
             return Err("peer disconnected".into());
         }
-        if self.lost_since.is_some_and(|at| at.elapsed() >= ICE_LOST_GRACE) {
+        if self
+            .lost_since
+            .is_some_and(|at| at.elapsed() >= ICE_LOST_GRACE)
+        {
             return Err("no path to the other game answers any more".into());
         }
-        Ok((std::mem::take(&mut self.signals), std::mem::take(&mut self.incoming)))
+        Ok((
+            std::mem::take(&mut self.signals),
+            std::mem::take(&mut self.incoming),
+        ))
     }
 
     /// The server-reflexive candidate: a Binding request from the first socket, retried a few times.
     fn ask_stun(&mut self) {
-        let Some(stun) = self.stun.as_mut() else { return };
+        let Some(stun) = self.stun.as_mut() else {
+            return;
+        };
         if stun.tries >= STUN_TRIES || Instant::now() < stun.next {
             return;
         }
         // An unreachable STUN server only costs this candidate; ICE goes on without it.
-        let _ = self.sockets[0].udp.send_to(&turn::binding_request(stun.id), stun.server);
+        let _ = self.sockets[0]
+            .udp
+            .send_to(&turn::binding_request(stun.id), stun.server);
         stun.tries += 1;
         stun.next = Instant::now() + STUN_RETRY;
     }
 
     /// True when the datagram was the STUN server's (an answer signals the candidate).
     fn stun_answer(&mut self, socket: usize, source: SocketAddr, bytes: &[u8]) -> Result<bool> {
-        let Some(stun) = self.stun.as_ref().filter(|s| s.server == source && socket == 0) else { return Ok(false) };
+        let Some(stun) = self
+            .stun
+            .as_ref()
+            .filter(|s| s.server == source && socket == 0)
+        else {
+            return Ok(false);
+        };
         if let Some(mapped) = turn::binding_address(bytes, &stun.id) {
             let candidate = Candidate::server_reflexive(mapped, self.sockets[0].local, "udp")?;
-            self.signals.push(json!({"type": "candidate", "candidate": candidate.to_sdp_string()}));
+            self.signals
+                .push(json!({"type": "candidate", "candidate": candidate.to_sdp_string()}));
             self.rtc.add_local_candidate(candidate);
             self.stun = None;
         }
@@ -290,8 +359,18 @@ impl Peer {
     }
 
     fn receive(&mut self, source: SocketAddr, destination: SocketAddr, bytes: &[u8]) -> Result<()> {
-        let Ok(contents) = bytes.try_into() else { return Ok(()) };
-        let input = Input::Receive(Instant::now(), Receive { proto: Protocol::Udp, source, destination, contents });
+        let Ok(contents) = bytes.try_into() else {
+            return Ok(());
+        };
+        let input = Input::Receive(
+            Instant::now(),
+            Receive {
+                proto: Protocol::Udp,
+                source,
+                destination,
+                contents,
+            },
+        );
         if self.rtc.accepts(&input) {
             self.rtc.handle_input(input)?;
             self.drain()?;
@@ -310,7 +389,8 @@ impl Peer {
             }
         }
         if let Some(mut channel) = self.rtc.channel(self.state) {
-            self.outgoing_states.retain(|_, bytes| !channel.write(true, bytes).unwrap_or(false));
+            self.outgoing_states
+                .retain(|_, bytes| !channel.write(true, bytes).unwrap_or(false));
         }
         Ok(())
     }
@@ -326,16 +406,26 @@ impl Peer {
                     IceConnectionState::Disconnected if self.connected => {
                         self.lost_since.get_or_insert_with(Instant::now);
                     }
-                    IceConnectionState::Connected | IceConnectionState::Completed => self.lost_since = None,
+                    IceConnectionState::Connected | IceConnectionState::Completed => {
+                        self.lost_since = None
+                    }
                     _ => {}
                 },
                 Output::Event(Event::PeerStats(stats)) => {
-                    if let (true, None, Some(pair)) = (self.connected, self.path, &stats.selected_candidate_pair) {
-                        self.path = Some(if is_local(pair.remote.addr.ip()) { Path::Lan } else { Path::Internet });
+                    if let (true, None, Some(pair)) =
+                        (self.connected, self.path, &stats.selected_candidate_pair)
+                    {
+                        self.path = Some(if is_local(pair.remote.addr.ip()) {
+                            Path::Lan
+                        } else {
+                            Path::Internet
+                        });
                     }
                     crate::diagnostics::peer("p2p", &stats, None);
                 }
-                Output::Event(Event::ChannelData(data)) if data.binary && data.data.len() <= MESSAGE_MAX => {
+                Output::Event(Event::ChannelData(data))
+                    if data.binary && data.data.len() <= MESSAGE_MAX =>
+                {
                     if data.id == self.state || data.id == self.events {
                         self.incoming.push((data.id == self.events, data.data));
                     }
@@ -347,7 +437,9 @@ impl Peer {
     }
 
     fn transmit(&mut self, source: SocketAddr, destination: SocketAddr, contents: &[u8]) {
-        let Some(socket) = self.sockets.iter().find(|s| s.local == source) else { return };
+        let Some(socket) = self.sockets.iter().find(|s| s.local == source) else {
+            return;
+        };
         if socket.answer_only && !socket.heard {
             return; // ICE retransmits; once the other game reaches this socket it answers
         }
@@ -372,11 +464,15 @@ impl Peer {
 /// connection's own. Not the room connection's first: a local test server (or an ssh tunnel to one)
 /// runs it over 127.0.0.1, where no other machine reaches.
 pub fn reachable_address(room: Option<IpAddr>) -> Option<IpAddr> {
-    let routed = STUN_SERVER.to_socket_addrs().ok().and_then(|mut found| found.find(|a| a.is_ipv4())).and_then(|server| {
-        let probe = UdpSocket::bind(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 0)).ok()?;
-        probe.connect(server).ok()?;
-        Some(probe.local_addr().ok()?.ip())
-    });
+    let routed = STUN_SERVER
+        .to_socket_addrs()
+        .ok()
+        .and_then(|mut found| found.find(|a| a.is_ipv4()))
+        .and_then(|server| {
+            let probe = UdpSocket::bind(SocketAddr::new(IpAddr::from([0, 0, 0, 0]), 0)).ok()?;
+            probe.connect(server).ok()?;
+            Some(probe.local_addr().ok()?.ip())
+        });
     routed.filter(|ip| !ip.is_unspecified()).or(room)
 }
 
@@ -384,11 +480,20 @@ pub fn reachable_address(room: Option<IpAddr>) -> Option<IpAddr> {
 fn is_local(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(ip) => {
-            ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || ip.is_multicast()
-                || ip.is_broadcast() || ip.octets()[0] == 0
+            ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || ip.is_broadcast()
+                || ip.octets()[0] == 0
         }
         IpAddr::V6(ip) => {
-            ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || ip.is_unique_local() || ip.is_unicast_link_local()
+            ip.is_loopback()
+                || ip.is_unspecified()
+                || ip.is_multicast()
+                || ip.is_unique_local()
+                || ip.is_unicast_link_local()
         }
     }
 }
@@ -396,7 +501,9 @@ fn is_local(ip: IpAddr) -> bool {
 fn random_id() -> Result<[u8; 12]> {
     use ring::rand::SecureRandom;
     let mut id = [0; 12];
-    ring::rand::SystemRandom::new().fill(&mut id).map_err(|_| "no random STUN transaction id")?;
+    ring::rand::SystemRandom::new()
+        .fill(&mut id)
+        .map_err(|_| "no random STUN transaction id")?;
     Ok(id)
 }
 
@@ -405,7 +512,12 @@ mod tests {
     use super::*;
 
     /// Runs two peers against each other until `done` says so, passing their signals across.
-    fn exchange(a: &mut Peer, b: &mut Peer, seconds: u64, mut done: impl FnMut(&mut Peer, &[(bool, Vec<u8>)]) -> bool) {
+    fn exchange(
+        a: &mut Peer,
+        b: &mut Peer,
+        seconds: u64,
+        mut done: impl FnMut(&mut Peer, &[(bool, Vec<u8>)]) -> bool,
+    ) {
         let end = Instant::now() + Duration::from_secs(seconds);
         while Instant::now() < end {
             let (signals, _) = a.poll().unwrap();
@@ -431,7 +543,12 @@ mod tests {
         bytes
     }
 
-    fn both_classes(a: &mut Peer, frames: &[(bool, Vec<u8>)], event: &mut bool, text: &[u8]) -> bool {
+    fn both_classes(
+        a: &mut Peer,
+        frames: &[(bool, Vec<u8>)],
+        event: &mut bool,
+        text: &[u8],
+    ) -> bool {
         if a.connected() {
             a.send(true, text.to_vec()).unwrap();
             a.send(false, state(1)).unwrap();
@@ -445,7 +562,9 @@ mod tests {
         let ip = "127.0.0.1".parse().unwrap();
         let (mut a, mut b) = (Peer::new(ip, true).unwrap(), Peer::new(ip, false).unwrap());
         let mut event = false;
-        exchange(&mut a, &mut b, 5, |a, frames| both_classes(a, frames, &mut event, b"hello"));
+        exchange(&mut a, &mut b, 5, |a, frames| {
+            both_classes(a, frames, &mut event, b"hello")
+        });
     }
 
     /// The other game goes silent after connecting (its network gone): this one
@@ -457,7 +576,9 @@ mod tests {
         let mut a = Peer::with_check_interval(ip, true, fast).unwrap();
         let mut b = Peer::with_check_interval(ip, false, fast).unwrap();
         let mut event = false;
-        exchange(&mut a, &mut b, 5, |a, frames| both_classes(a, frames, &mut event, b"hello"));
+        exchange(&mut a, &mut b, 5, |a, frames| {
+            both_classes(a, frames, &mut event, b"hello")
+        });
         drop(b);
         let lost = Instant::now();
         // str0m keeps a pair that the other side checked in the last 15 s (its
@@ -466,10 +587,16 @@ mod tests {
         loop {
             match a.poll() {
                 Err(e) => {
-                    assert!(lost.elapsed() >= ICE_LOST_GRACE, "failed before the grace: {e}");
+                    assert!(
+                        lost.elapsed() >= ICE_LOST_GRACE,
+                        "failed before the grace: {e}"
+                    );
                     break;
                 }
-                Ok(_) => assert!(lost.elapsed() < limit, "the peer never failed after its path went silent"),
+                Ok(_) => assert!(
+                    lost.elapsed() < limit,
+                    "the peer never failed after its path went silent"
+                ),
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -481,7 +608,14 @@ mod tests {
         let mut a = Peer::new(ip, true).unwrap();
         let (offer, _) = a.poll().unwrap();
         // Both host candidates are offered.
-        assert_eq!(offer[0]["sdp"].as_str().unwrap().matches("typ host").count(), 2);
+        assert_eq!(
+            offer[0]["sdp"]
+                .as_str()
+                .unwrap()
+                .matches("typ host")
+                .count(),
+            2
+        );
         assert!(a.sockets[1].answer_only && !a.sockets[1].heard);
         // A send from it before it was reached goes nowhere (and is no error).
         let (from, to) = (a.sockets[1].local, a.sockets[0].local);
@@ -519,7 +653,10 @@ mod tests {
         ];
         for m in bad {
             let e = a.signal(&m).unwrap_err().to_string();
-            assert!(e.starts_with("unreadable peer") || e.starts_with("peer offer"), "{e}");
+            assert!(
+                e.starts_with("unreadable peer") || e.starts_with("peer offer"),
+                "{e}"
+            );
             assert!(!e.contains("203.0.113"), "{e}");
         }
     }

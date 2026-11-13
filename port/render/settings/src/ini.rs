@@ -59,7 +59,8 @@ fn entry(line: &[u8]) -> Option<(&[u8], &[u8])> {
             return Some((key, &rest[..end]));
         }
     }
-    let cut = (0..v.len()).find(|&i| matches!(v[i], b';' | b'#') && (i == 0 || matches!(v[i - 1], b' ' | b'\t')));
+    let cut = (0..v.len())
+        .find(|&i| matches!(v[i], b';' | b'#') && (i == 0 || matches!(v[i - 1], b' ' | b'\t')));
     Some((key, trim(&v[..cut.unwrap_or(v.len())])))
 }
 
@@ -70,7 +71,10 @@ fn text(bytes: &[u8]) -> String {
 /// The spellings of `key`: a setting's key and variable name, else the key itself.
 fn names(key: &str) -> (Option<&'static Setting>, [&str; 2]) {
     match table::find(key) {
-        Some(s) => (Some(s), [s.key, if s.env.is_empty() { s.key } else { s.env }]),
+        Some(s) => (
+            Some(s),
+            [s.key, if s.env.is_empty() { s.key } else { s.env }],
+        ),
         None => (None, [key, key]),
     }
 }
@@ -86,7 +90,9 @@ pub fn check(key: &str, value: &str) -> Result<(), String> {
 
 impl Ini {
     pub fn parse(bytes: &[u8]) -> Ini {
-        Ini { text: bytes.to_vec() }
+        Ini {
+            text: bytes.to_vec(),
+        }
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -97,7 +103,10 @@ impl Ini {
         let mut out = Vec::new();
         let mut start = 0;
         while start < self.text.len() {
-            let end = self.text[start..].iter().position(|&b| b == b'\n').map_or(self.text.len(), |i| start + i + 1);
+            let end = self.text[start..]
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(self.text.len(), |i| start + i + 1);
             let mut content_end = end;
             if self.text[..content_end].ends_with(b"\n") {
                 content_end -= 1;
@@ -105,7 +114,11 @@ impl Ini {
             if self.text[start..content_end].ends_with(b"\r") {
                 content_end -= 1;
             }
-            out.push(Line { start, content_end, end });
+            out.push(Line {
+                start,
+                content_end,
+                end,
+            });
             start = end;
         }
         out
@@ -121,7 +134,10 @@ impl Ini {
             .into_iter()
             .filter_map(|l| {
                 let (k, v) = entry(self.content(l))?;
-                names.iter().any(|n| n.as_bytes().eq_ignore_ascii_case(k)).then_some((l, v))
+                names
+                    .iter()
+                    .any(|n| n.as_bytes().eq_ignore_ascii_case(k))
+                    .then_some((l, v))
             })
             .collect()
     }
@@ -130,15 +146,26 @@ impl Ini {
     /// width x height (a missing one the game's own), or monitor when width is.
     pub fn written(&self, key: &str) -> Option<String> {
         if key.eq_ignore_ascii_case("size") {
-            let side = |k: &str| self.written(k).or_else(|| table::find(k).map(|s| s.builtin.to_string()));
+            let side = |k: &str| {
+                self.written(k)
+                    .or_else(|| table::find(k).map(|s| s.builtin.to_string()))
+            };
             if !self.has("width") && !self.has("height") {
                 return None;
             }
             let (w, h) = (side("width")?, side("height")?);
-            return Some(if w.eq_ignore_ascii_case("monitor") { "monitor".into() } else { format!("{w}x{h}") });
+            return Some(if w.eq_ignore_ascii_case("monitor") {
+                "monitor".into()
+            } else {
+                format!("{w}x{h}")
+            });
         }
         let (_, names) = names(key);
-        self.lines_of(&names).into_iter().map(|(_, v)| v).find(|v| !v.is_empty()).map(text)
+        self.lines_of(&names)
+            .into_iter()
+            .map(|(_, v)| v)
+            .find(|v| !v.is_empty())
+            .map(text)
     }
 
     /// Whether dhd.ini has a value for `key`.
@@ -162,7 +189,10 @@ impl Ini {
     /// `key`'s value as the environment would make it: the variable when it is set (the
     /// environment overrides dhd.ini), else `value`.
     pub fn effective(&self, key: &str, env: impl Fn(&str) -> Option<String>) -> String {
-        match table::find(key).filter(|s| !s.env.is_empty()).and_then(|s| env(s.env)) {
+        match table::find(key)
+            .filter(|s| !s.env.is_empty())
+            .and_then(|s| env(s.env))
+        {
             Some(v) => v,
             None => self.value(key),
         }
@@ -180,7 +210,10 @@ impl Ini {
 
     /// Every line's key and value, in order (values as written, empty ones included).
     pub fn entries(&self) -> Vec<(String, String)> {
-        self.lines().into_iter().filter_map(|l| entry(self.content(l)).map(|(k, v)| (text(k), text(v)))).collect()
+        self.lines()
+            .into_iter()
+            .filter_map(|l| entry(self.content(l)).map(|(k, v)| (text(k), text(v))))
+            .collect()
     }
 
     /// Writes `key = value`: in place of the setting's first line (any spelling), whose line ending
@@ -192,19 +225,28 @@ impl Ini {
             let (w, h) = if value.eq_ignore_ascii_case("monitor") {
                 ("monitor", "monitor")
             } else {
-                value.split_once(['x', 'X']).ok_or_else(|| format!("not a window size: {value}"))?
+                value
+                    .split_once(['x', 'X'])
+                    .ok_or_else(|| format!("not a window size: {value}"))?
             };
             self.set("width", w.trim())?;
             return self.set("height", h.trim());
         }
         let (setting, names) = names(key);
         let key = setting.map_or(key, |s| s.key);
-        let quote = if value.contains([';', '#', '"']) || value.starts_with([' ', '\t']) || value.ends_with([' ', '\t']) {
+        let quote = if value.contains([';', '#', '"'])
+            || value.starts_with([' ', '\t'])
+            || value.ends_with([' ', '\t'])
+        {
             "\""
         } else {
             ""
         };
-        let line = if value.is_empty() { format!("{key} =") } else { format!("{key} = {quote}{value}{quote}") };
+        let line = if value.is_empty() {
+            format!("{key} =")
+        } else {
+            format!("{key} = {quote}{value}{quote}")
+        };
         let lines = self.lines();
         let ending: &[u8] = match lines.first() {
             Some(l) if self.text[l.content_end..l.end].starts_with(b"\r") => b"\r\n",

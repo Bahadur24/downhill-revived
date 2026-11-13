@@ -38,7 +38,8 @@ const CLASSES: usize = 16;
 const SMALL_MAX: usize = CLASS_STEP * CLASSES;
 // Every span start and length is a multiple of ALIGN, so a split leaves either nothing or a
 // remainder that can hold a span; and a large block's header fits below its pointer.
-const _: () = assert!(std::mem::size_of::<Span>() <= ALIGN && std::mem::size_of::<[usize; 2]>() <= HEADER);
+const _: () =
+    assert!(std::mem::size_of::<Span>() <= ALIGN && std::mem::size_of::<[usize; 2]>() <= HEADER);
 
 extern "C" {
     /// wasm-ld's end of the stack and static data: the heap starts here.
@@ -117,8 +118,13 @@ impl Bounded {
     }
 
     pub fn stats(&self) -> Stats {
-        Stats { base: Self::base(), top: HEAP_TOP, used: self.used.get(), peak: self.peak.get(),
-                failures: self.failures.get() }
+        Stats {
+            base: Self::base(),
+            top: HEAP_TOP,
+            used: self.used.get(),
+            peak: self.peak.get(),
+            failures: self.failures.get(),
+        }
     }
 
     /// The whole window as one free span (first use).
@@ -127,7 +133,12 @@ impl Bounded {
         if base + ALIGN <= HEAP_TOP {
             let s = base as *mut Span;
             // SAFETY: [base, HEAP_TOP) is the heap window, owned by this allocator alone.
-            unsafe { s.write(Span { len: HEAP_TOP - base, next: null_mut() }) };
+            unsafe {
+                s.write(Span {
+                    len: HEAP_TOP - base,
+                    next: null_mut(),
+                })
+            };
             self.spans.set(s);
         }
         self.ready.set(true);
@@ -155,7 +166,12 @@ impl Bounded {
     ///
     /// # Safety
     /// The large list is well formed (only this allocator writes it).
-    unsafe fn take(&self, need: usize, align: usize, header: bool) -> Option<(usize, usize, usize)> {
+    unsafe fn take(
+        &self,
+        need: usize,
+        align: usize,
+        header: bool,
+    ) -> Option<(usize, usize, usize)> {
         let mut prev: *mut Span = null_mut();
         let mut cur = self.spans.get();
         while !cur.is_null() {
@@ -170,7 +186,12 @@ impl Bounded {
                     let (taken, rest) = if end > stop {
                         let r = stop as *mut Span;
                         // SAFETY: [stop, end) is inside the free span being taken apart.
-                        unsafe { r.write(Span { len: end - stop, next }) };
+                        unsafe {
+                            r.write(Span {
+                                len: end - stop,
+                                next,
+                            })
+                        };
                         (stop - start, r)
                     } else {
                         (len, next)
@@ -250,7 +271,11 @@ unsafe impl GlobalAlloc for Bounded {
             };
         }
         let align = layout.align().max(ALIGN);
-        let Some(need) = layout.size().checked_add(ALIGN - 1).map(|n| n & !(ALIGN - 1)) else {
+        let Some(need) = layout
+            .size()
+            .checked_add(ALIGN - 1)
+            .map(|n| n & !(ALIGN - 1))
+        else {
             return self.refuse(layout);
         };
         // SAFETY: the large list is well formed.
@@ -269,7 +294,11 @@ unsafe impl GlobalAlloc for Bounded {
         if let Some(c) = class_of(layout) {
             let b = ptr as *mut Small;
             // SAFETY: ptr is a block of class c that std gives back.
-            unsafe { b.write(Small { next: self.classes[c].get() }) };
+            unsafe {
+                b.write(Small {
+                    next: self.classes[c].get(),
+                })
+            };
             self.classes[c].set(b);
             self.used.set(self.used.get() - (c + 1) * CLASS_STEP);
             return;

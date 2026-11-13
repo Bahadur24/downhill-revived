@@ -29,18 +29,25 @@ fn pipeline(gpu: &Gpu) -> Result<wgpu::ComputePipeline, String> {
         return Ok(p.clone());
     }
     let scope = gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("raster.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(crate::shaders::RASTER.into()),
-    });
-    let p = gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("depth_probe"),
-        layout: None,
-        module: &module,
-        entry_point: Some("depth_probe"),
-        compilation_options: wgpu::PipelineCompilationOptions { constants: &[], zero_initialize_workgroup_memory: false },
-        cache: None,
-    });
+    let module = gpu
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("raster.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::RASTER.into()),
+        });
+    let p = gpu
+        .device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("depth_probe"),
+            layout: None,
+            module: &module,
+            entry_point: Some("depth_probe"),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants: &[],
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        });
     if let Some(e) = pollster::block_on(scope.pop()) {
         return Err(format!("depth_probe pipeline: {e}"));
     }
@@ -49,15 +56,24 @@ fn pipeline(gpu: &Gpu) -> Result<wgpu::ComputePipeline, String> {
 }
 
 fn buffer(gpu: &Gpu, label: &str, size: u64, usage: wgpu::BufferUsages) -> wgpu::Buffer {
-    gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false })
+    gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage,
+        mapped_at_creation: false,
+    })
 }
 
 /// Blocking read of the first `size` bytes of a MAP_READ buffer: map_async, then poll until done.
 pub(crate) fn map_read(gpu: &Gpu, buffer: &wgpu::Buffer, size: u64) -> Result<Vec<u8>, String> {
     let status = Arc::new(Mutex::new(None));
     let s = status.clone();
-    buffer.map_async(wgpu::MapMode::Read, 0..size, move |r| *s.lock().unwrap_or_else(|p| p.into_inner()) = Some(r));
-    gpu.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| format!("poll: {e}"))?;
+    buffer.map_async(wgpu::MapMode::Read, 0..size, move |r| {
+        *s.lock().unwrap_or_else(|p| p.into_inner()) = Some(r)
+    });
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|e| format!("poll: {e}"))?;
     let result = status.lock().unwrap_or_else(|p| p.into_inner()).take();
     match result {
         Some(Ok(())) => {}
@@ -71,8 +87,14 @@ pub(crate) fn map_read(gpu: &Gpu, buffer: &wgpu::Buffer, size: u64) -> Result<Ve
 
 /// Runs the probe: `cases` is `count * 80` bytes, `results` `count * 2` words.
 pub fn run(gpu: &Gpu, cases: &[u8], results: &mut [u32]) -> Result<(), String> {
-    if cases.len() as u64 % CASE_BYTES != 0 || (cases.len() as u64 / CASE_BYTES) * 2 != results.len() as u64 {
-        return Err(format!("{} case bytes for {} result words", cases.len(), results.len()));
+    if cases.len() as u64 % CASE_BYTES != 0
+        || (cases.len() as u64 / CASE_BYTES) * 2 != results.len() as u64
+    {
+        return Err(format!(
+            "{} case bytes for {} result words",
+            cases.len(),
+            results.len()
+        ));
     }
     let count = cases.len() as u64 / CASE_BYTES;
     if count == 0 {
@@ -82,32 +104,53 @@ pub fn run(gpu: &Gpu, cases: &[u8], results: &mut [u32]) -> Result<(), String> {
     let groups = count.div_ceil(WORKGROUP as u64);
     let limits = gpu.device.limits();
     if groups > limits.max_compute_workgroups_per_dimension as u64 {
-        return Err(format!("{count} cases need {groups} workgroups (the limit is {})",
-                           limits.max_compute_workgroups_per_dimension));
+        return Err(format!(
+            "{count} cases need {groups} workgroups (the limit is {})",
+            limits.max_compute_workgroups_per_dimension
+        ));
     }
     if in_size > limits.max_storage_buffer_binding_size as u64 {
-        return Err(format!("{count} cases are {in_size} bytes (the storage binding limit is {})",
-                           limits.max_storage_buffer_binding_size));
+        return Err(format!(
+            "{count} cases are {in_size} bytes (the storage binding limit is {})",
+            limits.max_storage_buffer_binding_size
+        ));
     }
     let pipe = pipeline(gpu)?;
     use wgpu::BufferUsages as U;
-    let constants = buffer(gpu, "probe constants", CONSTANTS_BYTES, U::UNIFORM | U::COPY_DST);
+    let constants = buffer(
+        gpu,
+        "probe constants",
+        CONSTANTS_BYTES,
+        U::UNIFORM | U::COPY_DST,
+    );
     let input = buffer(gpu, "probe cases", in_size, U::STORAGE | U::COPY_DST);
     let output = buffer(gpu, "probe results", out_size, U::STORAGE | U::COPY_SRC);
     let read = buffer(gpu, "probe readback", out_size, U::MAP_READ | U::COPY_DST);
-    gpu.queue.write_buffer(&constants, 0, &[0u8; CONSTANTS_BYTES as usize]);
+    gpu.queue
+        .write_buffer(&constants, 0, &[0u8; CONSTANTS_BYTES as usize]);
     gpu.queue.write_buffer(&input, 0, cases);
     let layout = pipe.get_bind_group_layout(0);
     let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("depth_probe"),
         layout: &layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: constants.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 8, resource: input.as_entire_binding() },
-            wgpu::BindGroupEntry { binding: 9, resource: output.as_entire_binding() },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: constants.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: input.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: output.as_entire_binding(),
+            },
         ],
     });
-    let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    let mut encoder = gpu
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
         pass.set_pipeline(&pipe);

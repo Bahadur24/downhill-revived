@@ -86,10 +86,14 @@ impl Pipelines {
         let m = memory.pop().await;
         let v = validation.pop().await;
         if let Some(e) = v.or(i) {
-            return Err(format!("raster.wgsl pipelines (raster key {raster_flags}): {e}"));
+            return Err(format!(
+                "raster.wgsl pipelines (raster key {raster_flags}): {e}"
+            ));
         }
         if let Some(e) = m {
-            return Err(format!("raster.wgsl pipelines (raster key {raster_flags}): out of memory: {e}"));
+            return Err(format!(
+                "raster.wgsl pipelines (raster key {raster_flags}): out of memory: {e}"
+            ));
         }
         store(gpu, &shared, raster_flags, &keyed);
         Ok(assemble(raster_flags, &shared, &keyed))
@@ -141,7 +145,9 @@ fn check_key(raster_flags: u32) -> Result<(), String> {
     if raster_flags < KEYS {
         Ok(())
     } else {
-        Err(format!("raster key {raster_flags:#x}: only DHDR_RASTER_* bits (0-7)"))
+        Err(format!(
+            "raster key {raster_flags:#x}: only DHDR_RASTER_* bits (0-7)"
+        ))
     }
 }
 
@@ -155,7 +161,12 @@ fn with_entry<R>(gpu: &Gpu, f: impl FnOnce(&Entry) -> R) -> Option<R> {
 }
 
 fn cached(gpu: &Gpu, key: u32) -> Option<Pipelines> {
-    with_entry(gpu, |e| e.keys[key as usize].as_ref().map(|k| assemble(key, &e.shared, k))).flatten()
+    with_entry(gpu, |e| {
+        e.keys[key as usize]
+            .as_ref()
+            .map(|k| assemble(key, &e.shared, k))
+    })
+    .flatten()
 }
 
 /// Keeps a successful build. The first stored `Shared` of a device stays (a concurrent build of
@@ -206,31 +217,50 @@ fn build(gpu: &Gpu, key: u32) -> (Shared, Keyed) {
 }
 
 fn module(gpu: &Gpu) -> wgpu::ShaderModule {
-    gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("raster.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(crate::shaders::RASTER.into()),
-    })
+    gpu.device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("raster.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::RASTER.into()),
+        })
 }
 
-fn buffer_entry(binding: u32, ty: wgpu::BufferBindingType, dynamic: bool, min: u64) -> wgpu::BindGroupLayoutEntry {
+fn buffer_entry(
+    binding: u32,
+    ty: wgpu::BufferBindingType,
+    dynamic: bool,
+    min: u64,
+) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::COMPUTE,
-        ty: wgpu::BindingType::Buffer { ty, has_dynamic_offset: dynamic, min_binding_size: NonZeroU64::new(min) },
+        ty: wgpu::BindingType::Buffer {
+            ty,
+            has_dynamic_offset: dynamic,
+            min_binding_size: NonZeroU64::new(min),
+        },
         count: None,
     }
 }
 
-fn compute(gpu: &Gpu, module: &wgpu::ShaderModule, layout: Option<&wgpu::PipelineLayout>, entry: &str,
-           constants: &[(&str, f64)]) -> wgpu::ComputePipeline {
-    gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some(entry),
-        layout,
-        module,
-        entry_point: Some(entry),
-        compilation_options: wgpu::PipelineCompilationOptions { constants, zero_initialize_workgroup_memory: false },
-        cache: None,
-    })
+fn compute(
+    gpu: &Gpu,
+    module: &wgpu::ShaderModule,
+    layout: Option<&wgpu::PipelineLayout>,
+    entry: &str,
+    constants: &[(&str, f64)],
+) -> wgpu::ComputePipeline {
+    gpu.device
+        .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some(entry),
+            layout,
+            module,
+            entry_point: Some(entry),
+            compilation_options: wgpu::PipelineCompilationOptions {
+                constants,
+                zero_initialize_workgroup_memory: false,
+            },
+            cache: None,
+        })
 }
 
 /// gpu_wgpu.c:237-261 (main's layout: as the automatic one, but the batch record takes a dynamic
@@ -239,38 +269,57 @@ fn build_shared(gpu: &Gpu) -> Shared {
     use wgpu::BufferBindingType as T;
     let module = module(gpu);
     let ro = T::Storage { read_only: true };
-    let main_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("main"),
-        entries: &[
-            buffer_entry(MAIN_BINDINGS[0], T::Uniform, true, 16),
-            buffer_entry(MAIN_BINDINGS[1], ro, false, 0),
-            buffer_entry(MAIN_BINDINGS[2], T::Storage { read_only: false }, false, 0),
-            buffer_entry(MAIN_BINDINGS[3], ro, false, 0),
-            buffer_entry(MAIN_BINDINGS[4], ro, false, 0),
-            buffer_entry(MAIN_BINDINGS[5], ro, false, 0),
-        ],
-    });
-    let main_pipeline_layout = gpu.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("main"),
-        bind_group_layouts: &[Some(&main_layout)],
-        immediate_size: 0,
-    });
+    let main_layout = gpu
+        .device
+        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("main"),
+            entries: &[
+                buffer_entry(MAIN_BINDINGS[0], T::Uniform, true, 16),
+                buffer_entry(MAIN_BINDINGS[1], ro, false, 0),
+                buffer_entry(MAIN_BINDINGS[2], T::Storage { read_only: false }, false, 0),
+                buffer_entry(MAIN_BINDINGS[3], ro, false, 0),
+                buffer_entry(MAIN_BINDINGS[4], ro, false, 0),
+                buffer_entry(MAIN_BINDINGS[5], ro, false, 0),
+            ],
+        });
+    let main_pipeline_layout = gpu
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("main"),
+            bind_group_layouts: &[Some(&main_layout)],
+            immediate_size: 0,
+        });
     let scanout = compute(gpu, &module, None, "scanout", &[]);
     let scanout_layout = scanout.get_bind_group_layout(0);
-    Shared { module, main_layout, main_pipeline_layout, scanout, scanout_layout }
+    Shared {
+        module,
+        main_layout,
+        main_pipeline_layout,
+        scanout,
+        scanout_layout,
+    }
 }
 
 /// gpu_wgpu.c:264-283: the DHD_GS_* shader options as raster.wgsl's override constants.
 fn build_keyed(gpu: &Gpu, s: &Shared, key: u32) -> Keyed {
-    use crate::abi::{DHDR_RASTER_ADDRESS_SHIFT, DHDR_RASTER_EARLY_DEPTH, DHDR_RASTER_EXCLUSIVE_WORD_STORE};
+    use crate::abi::{
+        DHDR_RASTER_ADDRESS_SHIFT, DHDR_RASTER_EARLY_DEPTH, DHDR_RASTER_EXCLUSIVE_WORD_STORE,
+    };
     let bit = |b: u32| if key & b != 0 { 1.0 } else { 0.0 };
     let c = [
         ("EARLY_DEPTH", bit(DHDR_RASTER_EARLY_DEPTH)),
         ("ADDRESS_SHIFT", bit(DHDR_RASTER_ADDRESS_SHIFT)),
-        ("EXCLUSIVE_WORD_STORE", bit(DHDR_RASTER_EXCLUSIVE_WORD_STORE)),
+        (
+            "EXCLUSIVE_WORD_STORE",
+            bit(DHDR_RASTER_EXCLUSIVE_WORD_STORE),
+        ),
     ];
     let main = compute(gpu, &s.module, Some(&s.main_pipeline_layout), "main", &c);
     let local_copy = compute(gpu, &s.module, None, "local_copy", &c[1..2]);
     let local_copy_layout = local_copy.get_bind_group_layout(0);
-    Keyed { main, local_copy, local_copy_layout }
+    Keyed {
+        main,
+        local_copy,
+        local_copy_layout,
+    }
 }

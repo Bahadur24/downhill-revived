@@ -11,7 +11,9 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
 fn usa() -> Option<String> {
-    std::env::var("DHD_ISO").ok().filter(|p| Path::new(p).is_file())
+    std::env::var("DHD_ISO")
+        .ok()
+        .filter(|p| Path::new(p).is_file())
 }
 
 #[test]
@@ -28,7 +30,8 @@ fn the_usa_disc_gives_its_value() {
         let mut tags = Vec::new();
         entries.sort_by_key(|e| e.sector);
         for e in &entries {
-            f.seek(SeekFrom::Start(e.sector as u64 * dhd_disc::SECTOR)).unwrap();
+            f.seek(SeekFrom::Start(e.sector as u64 * dhd_disc::SECTOR))
+                .unwrap();
             let mut data = vec![0u8; e.size as usize];
             std::io::Read::read_exact(&mut f, &mut data).unwrap();
             let contents = ring::digest::digest(&ring::digest::SHA256, &data);
@@ -54,10 +57,20 @@ fn a_copy_differs_only_where_a_file_does() {
         return;
     };
     let copy = Path::new(&copy);
-    assert!(!copy.to_string_lossy().to_ascii_lowercase().starts_with("c:"), "not on C:");
+    assert!(
+        !copy
+            .to_string_lossy()
+            .to_ascii_lowercase()
+            .starts_with("c:"),
+        "not on C:"
+    );
     fs::copy(&iso, copy).unwrap();
     let flip = |at: u64| {
-        let mut f = fs::OpenOptions::new().read(true).write(true).open(copy).unwrap();
+        let mut f = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(copy)
+            .unwrap();
         let mut b = [0u8];
         f.seek(SeekFrom::Start(at)).unwrap();
         std::io::Read::read_exact(&mut f, &mut b).unwrap();
@@ -74,7 +87,13 @@ fn a_copy_differs_only_where_a_file_does() {
     flip(big.sector as u64 * dhd_disc::SECTOR + big.size as u64 / 2);
     let in_a_file = dhd_disc::files_sha256(copy, |_, _| true).unwrap();
     fs::remove_file(copy).unwrap();
-    println!("sector 0 flipped: {}; {} flipped: {} ({})", system_area.hex(), big.path, in_a_file.hex(), in_a_file.note());
+    println!(
+        "sector 0 flipped: {}; {} flipped: {} ({})",
+        system_area.hex(),
+        big.path,
+        in_a_file.hex(),
+        in_a_file.note()
+    );
     assert_eq!(system_area.hex(), dhd_disc::USA_FILES_SHA256);
     assert_ne!(in_a_file.hex(), dhd_disc::USA_FILES_SHA256);
     assert_eq!(in_a_file.first_other.as_deref(), Some(big.path.as_str()));

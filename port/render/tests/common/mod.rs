@@ -44,7 +44,10 @@ pub enum Compiler {
 pub fn dxc_path() -> String {
     let p = std::env::var("DHDR_TEST_DXC")
         .expect("DHDR_TEST_DXC is not set: run the tests through port/tools/rustgs.py test (it passes dxc.py's x64 dxcompiler.dll)");
-    assert!(std::path::Path::new(&p).is_file(), "DHDR_TEST_DXC={p} is not a file");
+    assert!(
+        std::path::Path::new(&p).is_file(),
+        "DHDR_TEST_DXC={p} is not a file"
+    );
     p
 }
 
@@ -63,7 +66,13 @@ pub fn options(adapter: Adapter, compiler: Compiler) -> DeviceOptions {
         }
         Compiler::Dxc => Some(dxc_path()),
     };
-    DeviceOptions { flags, vendor_id: 0, device_id: 0, log_level: DHDR_LOG_WARN, dxc_path }
+    DeviceOptions {
+        flags,
+        vendor_id: 0,
+        device_id: 0,
+        log_level: DHDR_LOG_WARN,
+        dxc_path,
+    }
 }
 
 /// A device of the test's own (not the process's global one), kept for the process.
@@ -156,7 +165,12 @@ fn skip(b: &[u8], at: &mut usize) {
 
 fn expect(b: &[u8], at: &mut usize, c: u8) {
     skip(b, at);
-    assert!(*at < b.len() && b[*at] == c, "JSON: expected {:?} at {}", c as char, *at);
+    assert!(
+        *at < b.len() && b[*at] == c,
+        "JSON: expected {:?} at {}",
+        c as char,
+        *at
+    );
     *at += 1;
 }
 
@@ -237,16 +251,30 @@ fn value(b: &[u8], at: &mut usize) -> Json {
             while *at < b.len() && b[*at].is_ascii_digit() {
                 *at += 1;
             }
-            assert!(*at > start, "JSON: unexpected {:?} at {start}", b[start] as char);
-            assert!(*at >= b.len() || !matches!(b[*at], b'.' | b'e' | b'E'), "JSON: fractions are not used in tests/data");
-            Json::Int(std::str::from_utf8(&b[start..*at]).unwrap().parse().expect("JSON: integer"))
+            assert!(
+                *at > start,
+                "JSON: unexpected {:?} at {start}",
+                b[start] as char
+            );
+            assert!(
+                *at >= b.len() || !matches!(b[*at], b'.' | b'e' | b'E'),
+                "JSON: fractions are not used in tests/data"
+            );
+            Json::Int(
+                std::str::from_utf8(&b[start..*at])
+                    .unwrap()
+                    .parse()
+                    .expect("JSON: integer"),
+            )
         }
     }
 }
 
 /// `tests/data/<name>`, parsed.
 pub fn data(name: &str) -> Json {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data")
+        .join(name);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     Json::parse(&text)
 }

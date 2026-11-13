@@ -37,7 +37,8 @@ pub fn get(url: &str) -> Result<Vec<u8>, String> {
 fn split_scheme(url: &str) -> Option<(String, &str)> {
     let (scheme, rest) = url.split_once(':')?;
     let mut chars = scheme.chars();
-    let valid = chars.next()?.is_ascii_alphabetic() && chars.all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
+    let valid = chars.next()?.is_ascii_alphabetic()
+        && chars.all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c));
     valid.then(|| (scheme.to_ascii_lowercase(), rest))
 }
 
@@ -55,7 +56,7 @@ fn remove_dot_segments(path: &str) -> String {
             s => out.push(s),
         }
         if last && (*segment == "." || *segment == "..") {
-            out.push("");  // "a/b/.." names the folder: a/
+            out.push(""); // "a/b/.." names the folder: a/
         }
     }
     format!("/{}", out.join("/"))
@@ -67,10 +68,12 @@ fn remove_dot_segments(path: &str) -> String {
 /// refused.
 fn redirect_target(from: &str, location: &str) -> Result<String, String> {
     let unusable = || format!("unusable redirect to {location}");
-    let (from_scheme, from_rest) = split_scheme(from).filter(|(_, r)| r.starts_with("//")).ok_or("bad URL")?;
+    let (from_scheme, from_rest) = split_scheme(from)
+        .filter(|(_, r)| r.starts_with("//"))
+        .ok_or("bad URL")?;
     let secure = from_scheme == "https" || from_scheme == "wss";
     let location = location.trim();
-    let location = location.split('#').next().unwrap_or_default();  // a fragment is never sent
+    let location = location.split('#').next().unwrap_or_default(); // a fragment is never sent
     let (target_scheme, target) = match split_scheme(location) {
         Some((scheme, rest)) => {
             if !(scheme == "https" || scheme == "http") || !rest.starts_with("//") {
@@ -81,20 +84,33 @@ fn redirect_target(from: &str, location: &str) -> Result<String, String> {
         }
         None if location.starts_with("//") => return Err(unusable()),
         None => {
-            let host_end = from_rest[2..].find(['/', '?', '#']).map_or(from_rest.len(), |i| i + 2);
-            let from_path = from_rest[host_end..].split(['?', '#']).next().unwrap_or_default();
+            let host_end = from_rest[2..]
+                .find(['/', '?', '#'])
+                .map_or(from_rest.len(), |i| i + 2);
+            let from_path = from_rest[host_end..]
+                .split(['?', '#'])
+                .next()
+                .unwrap_or_default();
             let (path, query) = location.split_at(location.find('?').unwrap_or(location.len()));
             let joined = if path.starts_with('/') {
                 path.to_string()
             } else if path.is_empty() {
                 // only a query: the same path
-                if from_path.is_empty() { "/".to_string() } else { from_path.to_string() }
+                if from_path.is_empty() {
+                    "/".to_string()
+                } else {
+                    from_path.to_string()
+                }
             } else {
                 // relative to from's folder (up to its last '/')
                 let folder = from_path.rfind('/').map_or("/", |i| &from_path[..=i]);
                 format!("{folder}{path}")
             };
-            let target = format!("{from_scheme}:{}{}{query}", &from_rest[..host_end], remove_dot_segments(&joined));
+            let target = format!(
+                "{from_scheme}:{}{}{query}",
+                &from_rest[..host_end],
+                remove_dot_segments(&joined)
+            );
             (from_scheme.clone(), target)
         }
     };
@@ -105,9 +121,15 @@ fn redirect_target(from: &str, location: &str) -> Result<String, String> {
 }
 
 fn get_once(url: &str) -> Result<Answer, String> {
-    let (secure, rest) = if let Some(r) = url.strip_prefix("https://").or_else(|| url.strip_prefix("wss://")) {
+    let (secure, rest) = if let Some(r) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("wss://"))
+    {
         (true, r)
-    } else if let Some(r) = url.strip_prefix("http://").or_else(|| url.strip_prefix("ws://")) {
+    } else if let Some(r) = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("ws://"))
+    {
         (false, r)
     } else {
         return Err(format!("bad URL {url}"));
@@ -122,7 +144,9 @@ fn get_once(url: &str) -> Result<Answer, String> {
     let request = format!(
         "GET {path} HTTP/1.1\r\nHost: {authority}\r\nUser-Agent: {AGENT}\r\nAccept: */*\r\nConnection: close\r\n\r\n"
     );
-    s.write_all(request.as_bytes()).and_then(|_| s.flush()).map_err(|e| e.to_string())?;
+    s.write_all(request.as_bytes())
+        .and_then(|_| s.flush())
+        .map_err(|e| e.to_string())?;
     let mut data = Vec::new();
     let mut buf = [0u8; 16384];
     loop {
@@ -144,10 +168,16 @@ fn get_once(url: &str) -> Result<Answer, String> {
         _ => return Err("no HTTP response".into()),
     };
     let header = |name: &str| {
-        response.headers.iter().find(|h| h.name.eq_ignore_ascii_case(name)).map(|h| String::from_utf8_lossy(h.value).trim().to_string())
+        response
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| String::from_utf8_lossy(h.value).trim().to_string())
     };
     if let Some(code @ (301 | 302 | 303 | 307 | 308)) = response.code {
-        return header("location").map(Answer::Redirect).ok_or_else(|| format!("HTTP {code} without a Location"));
+        return header("location")
+            .map(Answer::Redirect)
+            .ok_or_else(|| format!("HTTP {code} without a Location"));
     }
     if response.code != Some(200) {
         return Err(format!("HTTP {}", response.code.unwrap_or(0)));
@@ -167,8 +197,13 @@ fn get_once(url: &str) -> Result<Answer, String> {
 pub(crate) fn dechunk(mut body: &[u8]) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     loop {
-        let line = body.windows(2).position(|w| w == b"\r\n").ok_or("short chunk")?;
-        let size = std::str::from_utf8(&body[..line]).ok().and_then(|l| usize::from_str_radix(l.split(';').next()?.trim(), 16).ok());
+        let line = body
+            .windows(2)
+            .position(|w| w == b"\r\n")
+            .ok_or("short chunk")?;
+        let size = std::str::from_utf8(&body[..line])
+            .ok()
+            .and_then(|l| usize::from_str_radix(l.split(';').next()?.trim(), 16).ok());
         let size = size.ok_or("bad chunk size")?;
         body = &body[line + 2..];
         if size == 0 {
@@ -188,16 +223,24 @@ mod tests {
 
     #[test]
     fn redirects() {
-        let from = "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json";
+        let from =
+            "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json";
         assert_eq!(
             redirect_target(from, "https://release-assets.githubusercontent.com/x?y=1").unwrap(),
             "https://release-assets.githubusercontent.com/x?y=1"
         );
         assert_eq!(
-            redirect_target(from, "/skuza-oss/downhill-revived/releases/download/v1.0.0/latest.json").unwrap(),
+            redirect_target(
+                from,
+                "/skuza-oss/downhill-revived/releases/download/v1.0.0/latest.json"
+            )
+            .unwrap(),
             "https://github.com/skuza-oss/downhill-revived/releases/download/v1.0.0/latest.json"
         );
-        assert_eq!(redirect_target("http://localhost:8787/a", "/b").unwrap(), "http://localhost:8787/b");
+        assert_eq!(
+            redirect_target("http://localhost:8787/a", "/b").unwrap(),
+            "http://localhost:8787/b"
+        );
         assert!(redirect_target(from, "http://example.org/latest.json").is_err());
         assert!(redirect_target(from, "//example.org/latest.json").is_err());
     }
@@ -207,19 +250,55 @@ mod tests {
     fn relative_and_case_insensitive_redirects() {
         let from = "https://github.com/skuza-oss/downhill-revived/releases/latest/download/latest.json?x=1";
         let base = "https://github.com/skuza-oss/downhill-revived/releases";
-        assert_eq!(redirect_target(from, "latest2.json").unwrap(), format!("{base}/latest/download/latest2.json"));
-        assert_eq!(redirect_target(from, "./a/b.json?y=2#frag").unwrap(), format!("{base}/latest/download/a/b.json?y=2"));
-        assert_eq!(redirect_target(from, "../../download/v1.0.0/latest.json").unwrap(), format!("{base}/download/v1.0.0/latest.json"));
-        assert_eq!(redirect_target(from, "..").unwrap(), format!("{base}/latest/"));
-        assert_eq!(redirect_target(from, "/a/./b/../c").unwrap(), "https://github.com/a/c");
-        assert_eq!(redirect_target(from, "/../../x").unwrap(), "https://github.com/x");
-        assert_eq!(redirect_target(from, "?page=2").unwrap(), format!("{base}/latest/download/latest.json?page=2"));
-        assert_eq!(redirect_target("http://localhost:8787", "b").unwrap(), "http://localhost:8787/b");
-        assert_eq!(redirect_target("http://localhost:8787?q", "b").unwrap(), "http://localhost:8787/b");
-        assert_eq!(redirect_target("wss://dhd.test/v1/a", "b").unwrap(), "wss://dhd.test/v1/b");
+        assert_eq!(
+            redirect_target(from, "latest2.json").unwrap(),
+            format!("{base}/latest/download/latest2.json")
+        );
+        assert_eq!(
+            redirect_target(from, "./a/b.json?y=2#frag").unwrap(),
+            format!("{base}/latest/download/a/b.json?y=2")
+        );
+        assert_eq!(
+            redirect_target(from, "../../download/v1.0.0/latest.json").unwrap(),
+            format!("{base}/download/v1.0.0/latest.json")
+        );
+        assert_eq!(
+            redirect_target(from, "..").unwrap(),
+            format!("{base}/latest/")
+        );
+        assert_eq!(
+            redirect_target(from, "/a/./b/../c").unwrap(),
+            "https://github.com/a/c"
+        );
+        assert_eq!(
+            redirect_target(from, "/../../x").unwrap(),
+            "https://github.com/x"
+        );
+        assert_eq!(
+            redirect_target(from, "?page=2").unwrap(),
+            format!("{base}/latest/download/latest.json?page=2")
+        );
+        assert_eq!(
+            redirect_target("http://localhost:8787", "b").unwrap(),
+            "http://localhost:8787/b"
+        );
+        assert_eq!(
+            redirect_target("http://localhost:8787?q", "b").unwrap(),
+            "http://localhost:8787/b"
+        );
+        assert_eq!(
+            redirect_target("wss://dhd.test/v1/a", "b").unwrap(),
+            "wss://dhd.test/v1/b"
+        );
         // the scheme in any case: lower-cased; never from https to http, whatever its case
-        assert_eq!(redirect_target(from, "HTTPS://Example.org/x").unwrap(), "https://Example.org/x");
-        assert_eq!(redirect_target("HTTP://localhost:8787/a/b", "c").unwrap(), "http://localhost:8787/a/c");
+        assert_eq!(
+            redirect_target(from, "HTTPS://Example.org/x").unwrap(),
+            "https://Example.org/x"
+        );
+        assert_eq!(
+            redirect_target("HTTP://localhost:8787/a/b", "c").unwrap(),
+            "http://localhost:8787/a/c"
+        );
         assert!(redirect_target(from, "HTTP://example.org/latest.json").is_err());
         assert!(redirect_target("HTTPS://github.com/a", "Http://github.com/b").is_err());
         // other schemes, and a scheme without "//", are refused

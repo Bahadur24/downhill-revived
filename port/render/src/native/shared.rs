@@ -108,14 +108,24 @@ impl NativeShared {
             border_color: None,
         });
         let replace = std::array::from_fn(|i| {
-            let address = |clamped: bool| if clamped { wgpu::AddressMode::ClampToEdge } else { wgpu::AddressMode::Repeat };
+            let address = |clamped: bool| {
+                if clamped {
+                    wgpu::AddressMode::ClampToEdge
+                } else {
+                    wgpu::AddressMode::Repeat
+                }
+            };
             let bilinear = i & 1 != 0;
             d.create_sampler(&wgpu::SamplerDescriptor {
                 label: Some("native replacement"),
                 address_mode_u: address(i & 2 != 0),
                 address_mode_v: address(i & 4 != 0),
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: if bilinear { wgpu::FilterMode::Linear } else { wgpu::FilterMode::Nearest },
+                mag_filter: if bilinear {
+                    wgpu::FilterMode::Linear
+                } else {
+                    wgpu::FilterMode::Nearest
+                },
                 min_filter: wgpu::FilterMode::Linear,
                 mipmap_filter: wgpu::MipmapFilterMode::Linear,
                 lod_min_clamp: 0.0,
@@ -128,7 +138,11 @@ impl NativeShared {
         let one = |format: wgpu::TextureFormat, label: &str| {
             d.create_texture(&wgpu::TextureDescriptor {
                 label: Some(label),
-                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -144,17 +158,40 @@ impl NativeShared {
         let dummy_view = dummy.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_depth_view = dummy_depth.create_view(&wgpu::TextureViewDescriptor::default());
         let dummy_group = texture_group(gpu, &texture_layout, &dummy_view, &nearest, "native none");
-        NativeShared { texture_layout, texels_layout, nearest, repeat, replace, dummy, dummy_view, dummy_texels, dummy_texels_view,
-                       dummy_depth, dummy_depth_view, dummy_group }
+        NativeShared {
+            texture_layout,
+            texels_layout,
+            nearest,
+            repeat,
+            replace,
+            dummy,
+            dummy_view,
+            dummy_texels,
+            dummy_texels_view,
+            dummy_depth,
+            dummy_depth_view,
+            dummy_group,
+        }
     }
 
     /// A group of `layout`-shape for `view` with `sampler` (native.wgsl group 1).
-    pub fn group(&self, gpu: &Gpu, view: &wgpu::TextureView, sampler: &wgpu::Sampler, label: &str) -> wgpu::BindGroup {
+    pub fn group(
+        &self,
+        gpu: &Gpu,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+        label: &str,
+    ) -> wgpu::BindGroup {
         texture_group(gpu, &self.texture_layout, view, sampler, label)
     }
 
     /// A decoded texture's group (texels layout: its R32Uint view and the repeating sampler).
-    pub fn texels_group(&self, gpu: &Gpu, view: &wgpu::TextureView, label: &str) -> wgpu::BindGroup {
+    pub fn texels_group(
+        &self,
+        gpu: &Gpu,
+        view: &wgpu::TextureView,
+        label: &str,
+    ) -> wgpu::BindGroup {
         texture_group(gpu, &self.texels_layout, view, &self.repeat, label)
     }
 }
@@ -192,8 +229,14 @@ fn texture_group(
         label: Some(label),
         layout,
         entries: &[
-            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) },
-            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
         ],
     })
 }

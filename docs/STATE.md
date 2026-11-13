@@ -125,6 +125,18 @@ in `online/server/wrangler.jsonc`, player defaults are `port/render/settings/src
 - SFU rooms (public, private, Quick Race) on Windows, macOS and Linux; P2P rooms there and on
   Android and in the browser, which offer nothing else (`host_service_net_offered`, findings 143,
   180, 186).
+- The unmerged `feature/android-lan` branch adds native Android Wi-Fi LAN rooms: same-Wi-Fi UDP
+  discovery and manual private IPv4:port entry, the host's current Wi-Fi address, host-controlled
+  rules, a pre-race connectivity check, reconnect after a temporary Wi-Fi drop, and solo hosting.
+  Wi-Fi discovery and interface selection remain independent of the Tailnet mode. No QR code or
+  in-app camera scan is used.
+- The same branch adds a separate Tailscale remote-room mode: the host manually enters a Tailscale
+  IPv4 (`100.64.0.0/10`) and shares the displayed, runtime-selected TCP `IP:port`; the guest enters
+  it manually. There is no automatic peer discovery, and Tailscale/VPN routing and any applicable
+  ACL must allow the port. Tailnet mode cancels and suppresses UDP Wi-Fi discovery while retaining
+  room-message connectivity checks. Host kick requires an explicit confirmation, and the server
+  validates the host role. Finding 199 records checks and limitations; no two-home device test has
+  been performed.
 - **State sync, never lockstep:** each PC runs its own one-player race at its own frame rate and
   shows the others, and on guests the host's AI riders, as puppet riders moved from snapshots
   (`port/hle/puppet.c`, findings 044, 047, 114). Hits are events; each game times its own finish.

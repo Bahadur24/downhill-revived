@@ -8,28 +8,49 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL3/SDL_timer.h>
+
 #include "client.h"
 #include "json.h"
 #include "ws.h"
 
-enum { REJOIN_ATTEMPTS = 5, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
+_Static_assert(sizeof(NetLanRoom) == 136, "Rust LAN discovery result size");
+_Static_assert(offsetof(NetLanRoom, max_players) == 128, "Rust LAN discovery capacity offset");
+_Static_assert(offsetof(NetLanRoom, rtt_ms) == 132, "Rust LAN discovery latency offset");
+
+extern int lan_host_start(char *url_out, size_t url_cap, char *address_out, size_t address_cap);
+extern int lan_guest_url(const char *address, char *url_out, size_t url_cap);
+extern int lan_host_start_tailnet(const char *address, char *url_out, size_t url_cap, char *address_out, size_t address_cap);
+extern int lan_tailnet_guest_url(const char *address, char *url_out, size_t url_cap);
+extern int lan_discover_start(void);
+extern int lan_discover_poll(NetLanRoom *out, int max);
+extern int lan_interfaces(NetLanInterface *out, int cap);
+extern int lan_host_select_ip(const char *address);
+extern int lan_host_refresh_address(char *out, size_t cap);
+extern void lan_host_stop(void);
+
+enum { REJOIN_ATTEMPTS = 5, LAN_REJOIN_ATTEMPTS = 8, SFU_CODE_LENGTH = 6, P2P_CODE_LENGTH = 7 };
 
 /* The rooms offered (host_api.h NET_OFFER_*). SFU rooms are not offered on phones yet (finding
-   143): their speed and the touch controls come first; Android builds refuse every SFU room here,
-   whatever asks (the menu, DHD_NET_*, a dhd.ini server). P2P rooms are (findings 180, 186), the SFU
-   fallback of their members included. */
+   143): Android builds refuse every SFU room here. Online P2P rooms (findings 180, 186) still use
+   the room service; LAN and Tailnet rooms use the host's in-process room service and local frame
+   relay. Tailnet is a separate manually-addressed mode, not LAN discovery over UDP. */
 #ifdef __ANDROID__
+#define NET_OFFERED (NET_OFFER_P2P | NET_OFFER_LAN | NET_OFFER_TAILNET)
+#elif defined(__EMSCRIPTEN__)
 #define NET_OFFERED NET_OFFER_P2P
 #else
-#define NET_OFFERED (NET_OFFER_SFU | NET_OFFER_P2P)
+#define NET_OFFERED (NET_OFFER_SFU | NET_OFFER_P2P | NET_OFFER_LAN | NET_OFFER_TAILNET)
 #endif
 #define NET_NOT_OFFERED "this kind of room is not offered here yet"
 
 static NetClient client;
 static WsConn *conn;
 static int inited;
-static char base[256], name[100], version[64], iso[65], next_url[300];
+static char base[256], name[100], version[64], iso[65], next_url[300], lan_address[64], lan_url[128];
 static SDL_Mutex *api;  /* serialises connect, leave and the reset between rooms */
+static double lan_address_refresh_ms;
+static int tailnet_room;
 
 static void send_text(void *ws, const char *text) { ws_send(ws, 0, text, strlen(text)); }
 static void send_binary(void *ws, const void *data, size_t n) { ws_send(ws, 1, data, n); }
@@ -51,12 +72,48 @@ static void on_message(void *ctx, int binary, const uint8_t *data, size_t n)
         client_on_text(&client, (const char *)data, n);
 }
 
+/* If a phone's Wi-Fi address changed during a drop, find this exact host session again rather than
+   blindly retrying the stale address. Discovery is local-only, bounded to its existing 1.5 s scan,
+   and its packets contain no PIN. The old endpoint remains a fallback when no room is found. */
+static void rediscover_lan_room(const char *room_id)
+{
+    NetLanRoom rooms[16];
+    double deadline;
+    if (!room_id || strlen(room_id) != 16 || !net_discover_lan_start()) return;
+    deadline = net_now_ms() + 2500.0;
+    while (net_now_ms() < deadline) {
+        int n = net_discover_lan_poll(rooms, 16), i;
+        if (n >= 0) {
+            for (i = 0; i < n; ++i) {
+                char url[128];
+                if (strcmp(rooms[i].room_id, room_id) != 0) continue;
+                if (!lan_guest_url(rooms[i].address, url, sizeof url)) return;
+                snprintf(lan_address, sizeof lan_address, "%s", rooms[i].address);
+                snprintf(lan_url, sizeof lan_url, "%s", url);
+                return;
+            }
+            return; /* scan completed; keep the previous endpoint if this host was not found */
+        }
+        if (n != -2) return;
+        SDL_Delay(50);
+    }
+}
+
 static const char *on_close(void *ctx, int code, const char *reason, int attempt)
 {
     NetLobby lobby;
     (void)ctx;
     if (!client_on_closed(&client, code, reason))
         return NULL;
+    if (client.lobby.is_lan) {
+        client_lobby(&client, &lobby);
+        if (attempt >= LAN_REJOIN_ATTEMPTS || lobby.reconnect_remaining_ms <= 0 || !lan_url[0]) {
+            client_rejoin_failed(&client);
+            return NULL;
+        }
+        if (!tailnet_room) rediscover_lan_room(lobby.lan_room_id);
+        return lan_url;
+    }
     if (attempt >= REJOIN_ATTEMPTS) {
         client_rejoin_failed(&client);
         return NULL;
@@ -94,26 +151,33 @@ void net_init(const char *base_url, const char *player_name, const char *build_v
     snprintf(iso, sizeof iso, "%s", iso_sha256);
 }
 
-static int connect_to(const char *path, int p2p)
+static int connect_url(const char *url, int p2p, int lan, int leave_first, const char *lan_pin)
 {
-    char url[300];
     WsHandler h = {NULL, on_open, on_message, on_close, on_tick};
     if (!inited)
         net_init(NULL, "Rider", "", "");
-    net_leave();
+    if (leave_first)
+        net_leave();
     SDL_LockMutex(api);
     client_free(&client);
     client_init(&client, name, version, iso);
     /* the install id (port/hle/host.c; finding 161), read here on the game's thread, the one that
        sets the environment */
     client_set_install_id(&client, getenv("DHD_NET_INSTALL_ID"));
-    if (!(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU))) {
+    if (lan_pin && !client_set_lan_pin(&client, lan_pin)) {
+        client.lobby.state = NET_FAILED;
+        snprintf(client.lobby.error_code, sizeof client.lobby.error_code, "lan_pin");
+        snprintf(client.lobby.error, sizeof client.lobby.error, "Enter a PIN of 4-8 digits, or leave it blank.");
+        SDL_UnlockMutex(api);
+        return -1;
+    }
+    if (!lan && !(NET_OFFERED & (p2p ? NET_OFFER_P2P : NET_OFFER_SFU))) {
         client.lobby.state = NET_FAILED;
         snprintf(client.lobby.error, sizeof client.lobby.error, NET_NOT_OFFERED);
         SDL_UnlockMutex(api);
         return -1;
     }
-    if (!base[0]) {
+    if (!lan && !base[0]) {
         client.lobby.state = NET_FAILED;
         snprintf(client.lobby.error, sizeof client.lobby.error, "no server: set DHD_NET_SERVER");
         SDL_UnlockMutex(api);
@@ -121,10 +185,20 @@ static int connect_to(const char *path, int p2p)
     }
     client.lobby.state = NET_CONNECTING;
     client.lobby.is_p2p = p2p;  /* until the welcome says (client.c) */
-    snprintf(url, sizeof url, "%s%s", base, path);
+    client.lobby.is_lan = lan;
+    snprintf(client.lobby.lan_address, sizeof client.lobby.lan_address, "%s", lan ? lan_address : "");
     conn = ws_start(url, &h);
     SDL_UnlockMutex(api);
     return 0;
+}
+
+static int connect_to(const char *path, int p2p)
+{
+    char url[300];
+    if (!inited)
+        net_init(NULL, "Rider", "", "");
+    snprintf(url, sizeof url, "%s%s", base, path);
+    return connect_url(url, p2p, 0, 1, NULL);
 }
 
 int net_create_room(int p2p)
@@ -158,6 +232,132 @@ int net_join_room(const char *code)
     return connect_to(path, p2p);
 }
 
+static void failed_connect(const char *message)
+{
+    if (!inited) net_init(NULL, "Rider", "", "");
+    net_leave();
+    SDL_LockMutex(api);
+    client_free(&client);
+    client_init(&client, name, version, iso);
+    client.lobby.state = NET_FAILED;
+    snprintf(client.lobby.error_code, sizeof client.lobby.error_code, "lan_setup");
+    snprintf(client.lobby.error, sizeof client.lobby.error, "%s", message);
+    SDL_UnlockMutex(api);
+}
+
+int net_host_lan(void)
+{
+    char url[128], address[64];
+    if (!inited) net_init(NULL, "Rider", "", "");
+    net_leave();
+    lan_address[0] = 0;
+    lan_address_refresh_ms = 0;
+    if (!lan_host_start(url, sizeof url, address, sizeof address)) {
+        failed_connect("Connect to Wi-Fi before hosting a LAN room.");
+        return -1;
+    }
+    snprintf(lan_address, sizeof lan_address, "%s", address);
+    snprintf(lan_url, sizeof lan_url, "%s", url);
+    return connect_url(url, 0, 1, 0, NULL);
+}
+
+int net_host_tailnet(const char *address)
+{
+    char url[128], endpoint[64];
+    if (!inited) net_init(NULL, "Rider", "", "");
+    net_leave();
+    lan_address[0] = 0;
+    lan_address_refresh_ms = 0;
+    if (!lan_host_start_tailnet(address, url, sizeof url, endpoint, sizeof endpoint)) {
+        failed_connect("Enter this device's Tailscale IPv4 address (100.64-127.x.x) before hosting.");
+        return -1;
+    }
+    tailnet_room = 1;
+    snprintf(lan_address, sizeof lan_address, "%s", endpoint);
+    snprintf(lan_url, sizeof lan_url, "%s", url);
+    return connect_url(url, 0, 1, 0, NULL);
+}
+
+int net_join_lan(const char *address)
+{
+    return net_join_lan_pin(address, "");
+}
+
+int net_join_lan_pin(const char *address, const char *pin)
+{
+    char url[128];
+    if (!inited) net_init(NULL, "Rider", "", "");
+    if (!pin) pin = "";
+    size_t pin_len = strlen(pin);
+    if (pin_len && (pin_len < 4 || pin_len > 8 || strspn(pin, "0123456789") != pin_len)) {
+        failed_connect("Enter a PIN of 4-8 digits, or leave it blank.");
+        return -1;
+    }
+    if (!lan_guest_url(address, url, sizeof url)) {
+        failed_connect("Enter the host's private IPv4 address and port.");
+        return -1;
+    }
+    net_leave();
+    snprintf(lan_address, sizeof lan_address, "%s", address);
+    snprintf(lan_url, sizeof lan_url, "%s", url);
+    return connect_url(url, 0, 1, 0, pin);
+}
+
+int net_join_tailnet(const char *address)
+{
+    return net_join_tailnet_pin(address, "");
+}
+
+int net_join_tailnet_pin(const char *address, const char *pin)
+{
+    char url[128];
+    if (!inited) net_init(NULL, "Rider", "", "");
+    if (!pin) pin = "";
+    size_t pin_len = strlen(pin);
+    if (pin_len && (pin_len < 4 || pin_len > 8 || strspn(pin, "0123456789") != pin_len)) {
+        failed_connect("Enter a PIN of 4-8 digits, or leave it blank.");
+        return -1;
+    }
+    if (!lan_tailnet_guest_url(address, url, sizeof url)) {
+        failed_connect("Enter the host's Tailscale 100.x IPv4 address and port.");
+        return -1;
+    }
+    net_leave();
+    tailnet_room = 1;
+    snprintf(lan_address, sizeof lan_address, "%s", address);
+    snprintf(lan_url, sizeof lan_url, "%s", url);
+    return connect_url(url, 0, 1, 0, pin);
+}
+
+int net_discover_lan_start(void) { return lan_discover_start(); }
+int net_discover_lan_poll(NetLanRoom *out, int max)
+{
+    if (max < 0 || max > 16 || (max && !out)) return -1;
+    return lan_discover_poll(out, max);
+}
+int net_lan_set_pin(const char *pin) { return inited && client_set_room_pin(&client, pin); }
+int net_lan_interfaces(NetLanInterface *out, int max)
+{
+    if (max < 0 || max > 16 || (max && !out)) return -1;
+    return lan_interfaces(out, max);
+}
+int net_lan_select_ip(const char *address)
+{
+    if (!address || !lan_host_select_ip(address)) return 0;
+    return net_lan_refresh_address();
+}
+int net_lan_refresh_address(void)
+{
+    char address[64];
+    if (!lan_host_refresh_address(address, sizeof address)) {
+        lan_address[0] = 0;
+        return 0;
+    }
+    snprintf(lan_address, sizeof lan_address, "%s", address);
+    return 1;
+}
+void net_lan_check_connections(void) { if (inited) client_check_connections(&client); }
+
 void net_leave(void)
 {
     WsConn *c;
@@ -169,6 +369,10 @@ void net_leave(void)
         client_leave(&client);
         ws_stop(c);
     }
+    lan_host_stop();
+    lan_address[0] = 0;
+    lan_url[0] = 0;
+    tailnet_room = 0;
     SDL_UnlockMutex(api);
 }
 
@@ -210,6 +414,18 @@ void net_get_lobby(NetLobby *out)
         return;
     }
     client_lobby(&client, out);
+    out->is_tailnet = out->is_lan && tailnet_room;
+    if (out->is_lan && out->is_host && !tailnet_room) {
+        double now = net_now_ms();
+        if (now - lan_address_refresh_ms >= 1000.0) {
+            lan_address_refresh_ms = now;
+            net_lan_refresh_address();
+        }
+    }
+    if (out->is_lan && lan_address[0])
+        snprintf(out->lan_address, sizeof out->lan_address, "%s", lan_address);
+    else if (out->is_lan)
+        out->lan_address[0] = 0;
 }
 
 double net_seconds(void)
@@ -275,6 +491,18 @@ void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
 int host_service_net_offered(void) { return NET_OFFERED; }
 int host_service_net_create_room(int p2p) { return net_create_room(p2p); }
 int host_service_net_join_room(uint32_t a0) { return net_join_room((const char *)GUEST(a0)); }
+int host_service_net_host_lan(void) { return net_host_lan(); }
+int host_service_net_host_tailnet(uint32_t a0) { return net_host_tailnet((const char *)GUEST(a0)); }
+int host_service_net_join_lan(uint32_t a0) { return net_join_lan((const char *)GUEST(a0)); }
+int host_service_net_join_lan_pin(uint32_t a0, uint32_t a1) { return net_join_lan_pin((const char *)GUEST(a0), (const char *)GUEST(a1)); }
+int host_service_net_join_tailnet_pin(uint32_t a0, uint32_t a1) { return net_join_tailnet_pin((const char *)GUEST(a0), (const char *)GUEST(a1)); }
+int host_service_net_set_lan_pin(uint32_t a0) { return net_lan_set_pin((const char *)GUEST(a0)); }
+int host_service_net_discover_lan_start(void) { return net_discover_lan_start(); }
+int host_service_net_discover_lan_poll(uint32_t a0, int max) { return net_discover_lan_poll((NetLanRoom *)GUEST(a0), max); }
+int host_service_net_lan_interfaces(uint32_t a0, int max) { return net_lan_interfaces((NetLanInterface *)GUEST(a0), max); }
+int host_service_net_lan_select_ip(uint32_t a0) { return net_lan_select_ip((const char *)GUEST(a0)); }
+int host_service_net_lan_refresh_address(void) { return net_lan_refresh_address(); }
+void host_service_net_lan_check(void) { net_lan_check_connections(); }
 void host_service_net_leave(void) { net_leave(); }
 void host_service_net_get_lobby(uint32_t a0) { net_get_lobby((NetLobby *)GUEST(a0)); }
 void host_service_net_pick(int a0, int a1, int a2) { net_pick(a0, a1, a2); }
@@ -285,6 +513,7 @@ void host_service_net_rotation(uint32_t address, int count) { if (count >= 0 && 
 void host_service_net_end_race(void) { net_end_race(); }
 void host_service_net_race_go(double at) { net_race_go(at); }
 void host_service_net_set_ready(int a0) { net_set_ready(a0); }
+void host_service_net_kick(int member) { net_kick(member); }
 void host_service_net_start_race(void) { net_start_race(); }
 int host_service_net_racing(void) { return net_racing(); }
 double host_service_net_seconds(void) { return net_seconds(); }

@@ -36,12 +36,18 @@ fn epoch() -> Instant {
 
 /// A secret from the environment, else from the server's gitignored `.dev.vars`; never printed.
 fn secret(k: &str) -> String {
-    if let Ok(v) = std::env::var(k) { return v; }
+    if let Ok(v) = std::env::var(k) {
+        return v;
+    }
     let dir = std::env::var("CARGO_MANIFEST_DIR").expect("run through cargo");
     let file = std::path::Path::new(&dir).join("../../../online/server/.dev.vars");
     let text = std::fs::read_to_string(file).expect("online/server/.dev.vars");
     text.lines()
-        .find_map(|l| l.trim().strip_prefix(k).and_then(|r| r.trim_start().strip_prefix('=')))
+        .find_map(|l| {
+            l.trim()
+                .strip_prefix(k)
+                .and_then(|r| r.trim_start().strip_prefix('='))
+        })
         .map(|v| v.trim().trim_matches('"').to_string())
         .expect("credential missing")
 }
@@ -55,17 +61,42 @@ fn api(method: &str, path: &str, body: &Value) -> Value {
 /// TURN credentials for one client, as the room mints them (online/server/src/sfu.ts Turn).
 pub(crate) fn turn_credentials(tag: &str) -> (String, Value) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
-    let r = call("POST", &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"), &token, &json!({"ttl": 3600, "customIdentifier": tag}));
-    let server = r["iceServers"].as_array().unwrap().iter().find(|s| s["username"].is_string()).unwrap().clone();
-    let urls: Vec<Value> = server["urls"].as_array().unwrap().iter().filter(|u| u.as_str().is_some_and(|u| u.starts_with("turns:"))).cloned().collect();
+    let r = call(
+        "POST",
+        &format!("/v1/turn/keys/{key}/credentials/generate-ice-servers"),
+        &token,
+        &json!({"ttl": 3600, "customIdentifier": tag}),
+    );
+    let server = r["iceServers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["username"].is_string())
+        .unwrap()
+        .clone();
+    let urls: Vec<Value> = server["urls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|u| u.as_str().is_some_and(|u| u.starts_with("turns:")))
+        .cloned()
+        .collect();
     let user = server["username"].as_str().unwrap().to_string();
-    (user.clone(), json!({"type":"sfu_turn","urls":urls,"username":user,"credential":server["credential"]}))
+    (
+        user.clone(),
+        json!({"type":"sfu_turn","urls":urls,"username":user,"credential":server["credential"]}),
+    )
 }
 
 /// Best effort: an expired credential is no longer found (a test's cleanup must not panic).
 pub(crate) fn revoke_turn(user: &str) {
     let (key, token) = (secret("TURN_KEY_ID"), secret("TURN_KEY_API_TOKEN"));
-    if let Err(e) = try_call("POST", &format!("/v1/turn/keys/{key}/credentials/{user}/revoke"), &token, &Value::Null) {
+    if let Err(e) = try_call(
+        "POST",
+        &format!("/v1/turn/keys/{key}/credentials/{user}/revoke"),
+        &token,
+        &Value::Null,
+    ) {
         eprintln!("TURN revoke: {e}");
     }
 }
@@ -79,47 +110,93 @@ fn call(method: &str, path: &str, token: &str, body: &Value) -> Value {
 }
 
 /// The same call, its failure returned: a status outside 2xx, an errorCode, no answer.
-fn try_call(method: &str, path: &str, token: &str, body: &Value) -> std::result::Result<Value, String> {
+fn try_call(
+    method: &str,
+    path: &str,
+    token: &str,
+    body: &Value,
+) -> std::result::Result<Value, String> {
     let uri: tungstenite::http::Uri = "https://rtc.live.cloudflare.com/".parse().unwrap();
-    let (mut s, tcp) = crate::stream::open(&uri, true).map_err(|_| "Realtime API connection".to_string())?;
+    let (mut s, tcp) =
+        crate::stream::open(&uri, true).map_err(|_| "Realtime API connection".to_string())?;
     let _ = tcp.set_read_timeout(Some(Duration::from_secs(15)));
-    let body = if body.is_null() { String::new() } else { body.to_string() };
+    let body = if body.is_null() {
+        String::new()
+    } else {
+        body.to_string()
+    };
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: rtc.live.cloudflare.com\r\nAuthorization: Bearer {token}\r\n\
          Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
-    s.write_all(request.as_bytes()).and_then(|_| s.flush()).map_err(|_| "Realtime API write".to_string())?;
+    s.write_all(request.as_bytes())
+        .and_then(|_| s.flush())
+        .map_err(|_| "Realtime API write".to_string())?;
     let mut data = Vec::new();
     let mut buf = [0u8; 16384];
     while let Ok(n) = s.read(&mut buf) {
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         data.extend_from_slice(&buf[..n]);
     }
     let mut headers = [httparse::EMPTY_HEADER; 64];
     let mut r = httparse::Response::new(&mut headers);
-    let start = match r.parse(&data) { Ok(httparse::Status::Complete(n)) => n, _ => return Err("no HTTP response".into()) };
-    let chunked = r.headers.iter().any(|h| h.name.eq_ignore_ascii_case("transfer-encoding")
-        && String::from_utf8_lossy(h.value).to_ascii_lowercase().contains("chunked"));
+    let start = match r.parse(&data) {
+        Ok(httparse::Status::Complete(n)) => n,
+        _ => return Err("no HTTP response".into()),
+    };
+    let chunked = r.headers.iter().any(|h| {
+        h.name.eq_ignore_ascii_case("transfer-encoding")
+            && String::from_utf8_lossy(h.value)
+                .to_ascii_lowercase()
+                .contains("chunked")
+    });
     let what = path.rsplit('/').next().unwrap_or("");
-    if !r.code.is_some_and(|c| (200..300).contains(&c)) { return Err(format!("Realtime API {what}: {:?}", r.code)); }
-    if r.code == Some(204) { return Ok(Value::Null); }
-    let body = if chunked { crate::http::dechunk(&data[start..]).map_err(|_| "bad chunks".to_string())? } else { data[start..].to_vec() };
+    if !r.code.is_some_and(|c| (200..300).contains(&c)) {
+        return Err(format!("Realtime API {what}: {:?}", r.code));
+    }
+    if r.code == Some(204) {
+        return Ok(Value::Null);
+    }
+    let body = if chunked {
+        crate::http::dechunk(&data[start..]).map_err(|_| "bad chunks".to_string())?
+    } else {
+        data[start..].to_vec()
+    };
     let v: Value = serde_json::from_slice(&body).map_err(|_| "Realtime JSON".to_string())?;
-    if let Some(code) = v.get("errorCode") { return Err(format!("Realtime error on {what}: {code}")); }
+    if let Some(code) = v.get("errorCode") {
+        return Err(format!("Realtime error on {what}: {code}"));
+    }
     Ok(v)
 }
 
 fn allocate(session: &str, member: u64, publisher: Option<&str>) -> Vec<Value> {
-    let policies = [json!({"dataChannelName":"state","ordered":false,"maxRetransmits":0}),
-                    json!({"dataChannelName":"events","ordered":true})];
-    let channels: Vec<Value> = policies.iter().map(|p| {
-        let mut p = p.clone();
-        p["location"] = json!(if publisher.is_some() { "remote" } else { "local" });
-        if let Some(s) = publisher { p["sessionId"] = json!(s); }
-        p
-    }).collect();
-    let r = api("POST", &format!("sessions/{session}/datachannels/new"), &json!({"dataChannels": channels}));
+    let policies = [
+        json!({"dataChannelName":"state","ordered":false,"maxRetransmits":0}),
+        json!({"dataChannelName":"events","ordered":true}),
+    ];
+    let channels: Vec<Value> = policies
+        .iter()
+        .map(|p| {
+            let mut p = p.clone();
+            p["location"] = json!(if publisher.is_some() {
+                "remote"
+            } else {
+                "local"
+            });
+            if let Some(s) = publisher {
+                p["sessionId"] = json!(s);
+            }
+            p
+        })
+        .collect();
+    let r = api(
+        "POST",
+        &format!("sessions/{session}/datachannels/new"),
+        &json!({"dataChannels": channels}),
+    );
     r["dataChannels"].as_array().unwrap().iter().map(|c| json!({
         "channelId": c["id"], "name": c["dataChannelName"], "memberId": member, "local": publisher.is_none(),
     })).collect()
@@ -148,7 +225,9 @@ unsafe extern "C" fn on_message(ctx: *mut c_void, binary: c_int, data: *const u8
     let bytes = unsafe { std::slice::from_raw_parts(data, n) };
     let mut rx = rx.lock().unwrap();
     if binary == 0 {
-        if String::from_utf8_lossy(bytes).contains("\"sfu_ready\"") { rx.ready = true; }
+        if String::from_utf8_lossy(bytes).contains("\"sfu_ready\"") {
+            rx.ready = true;
+        }
         return;
     }
     rx.record(bytes, now);
@@ -157,24 +236,45 @@ unsafe extern "C" fn on_message(ctx: *mut c_void, binary: c_int, data: *const u8
 impl Rx {
     /// A snapshot `[5, slot, 0, rider, seq u32, sent nanos u64, ...]` arriving at `now`.
     fn record(&mut self, bytes: &[u8], now: Instant) {
-        if bytes.len() < 16 || bytes[0] != 5 { return; }
+        if bytes.len() < 16 || bytes[0] != 5 {
+            return;
+        }
         let seq = u32::from_le_bytes(bytes[4..8].try_into().unwrap());
         let sent = u64::from_le_bytes(bytes[8..16].try_into().unwrap());
         let at = now.duration_since(epoch()).as_nanos() as u64;
-        self.delays.push((seq, at.saturating_sub(sent) as f64 / 1e6));
+        self.delays
+            .push((seq, at.saturating_sub(sent) as f64 / 1e6));
         if bytes[3] == 0 {
-            if let Some(last) = self.last_arrival { self.gaps.push((seq, now.duration_since(last).as_secs_f64() * 1e3)); }
+            if let Some(last) = self.last_arrival {
+                self.gaps
+                    .push((seq, now.duration_since(last).as_secs_f64() * 1e3));
+            }
             self.last_arrival = Some(now);
             self.seqs.insert(seq);
         }
     }
-    fn clear(&mut self) { self.delays.clear(); self.gaps.clear(); self.last_arrival = None; self.seqs.clear(); }
+    fn clear(&mut self) {
+        self.delays.clear();
+        self.gaps.clear();
+        self.last_arrival = None;
+        self.seqs.clear();
+    }
     /// The whole run, then each 30 s window (as the game's net: lines), when longer than one.
     fn report(&self, name: &str, ticks: u64) {
         let line = |label: String, from: u32, to: u32| {
-            let mut d: Vec<f64> = self.delays.iter().filter(|(t, _)| (from..to).contains(t)).map(|x| x.1).collect();
+            let mut d: Vec<f64> = self
+                .delays
+                .iter()
+                .filter(|(t, _)| (from..to).contains(t))
+                .map(|x| x.1)
+                .collect();
             d.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            let gaps: Vec<f64> = self.gaps.iter().filter(|(t, _)| (from..to).contains(t)).map(|x| x.1).collect();
+            let gaps: Vec<f64> = self
+                .gaps
+                .iter()
+                .filter(|(t, _)| (from..to).contains(t))
+                .map(|x| x.1)
+                .collect();
             let over100 = gaps.iter().filter(|g| **g > 100.0).count();
             let max_gap = gaps.iter().cloned().fold(0.0, f64::max);
             let got = self.seqs.iter().filter(|t| (from..to).contains(*t)).count();
@@ -186,7 +286,11 @@ impl Rx {
         line(name.to_string(), 0, ticks as u32);
         if ticks > 900 {
             for w in 0..ticks.div_ceil(900) as u32 {
-                line(format!("{name} window {}", w + 1), w * 900, ((w + 1) * 900).min(ticks as u32));
+                line(
+                    format!("{name} window {}", w + 1),
+                    w * 900,
+                    ((w + 1) * 900).min(ticks as u32),
+                );
             }
         }
     }
@@ -195,9 +299,12 @@ impl Rx {
 /// The snapshot one client sends for `rider` on `tick`.
 fn snapshot(me: usize, rider: u8, tick: u64, size: usize) -> Vec<u8> {
     let mut b = vec![0u8; size];
-    b[0] = 5; b[1] = me as u8; b[3] = rider;
+    b[0] = 5;
+    b[1] = me as u8;
+    b[3] = rider;
     b[4..8].copy_from_slice(&(tick as u32).to_le_bytes());
-    b[8..16].copy_from_slice(&(Instant::now().duration_since(epoch()).as_nanos() as u64).to_le_bytes());
+    b[8..16]
+        .copy_from_slice(&(Instant::now().duration_since(epoch()).as_nanos() as u64).to_le_bytes());
     b
 }
 
@@ -205,10 +312,19 @@ fn snapshot(me: usize, rider: u8, tick: u64, size: usize) -> Vec<u8> {
 fn wait_until(due: Instant) {
     while Instant::now() < due {
         let left = due - Instant::now();
-        if left > Duration::from_millis(2) { std::thread::sleep(left - Duration::from_millis(2)); } else { std::hint::spin_loop(); }
+        if left > Duration::from_millis(2) {
+            std::thread::sleep(left - Duration::from_millis(2));
+        } else {
+            std::hint::spin_loop();
+        }
     }
 }
-unsafe extern "C" fn on_close(_: *mut c_void, _: c_int, _: *const c_char, _: c_int) -> *const c_char {
+unsafe extern "C" fn on_close(
+    _: *mut c_void,
+    _: c_int,
+    _: *const c_char,
+    _: c_int,
+) -> *const c_char {
     std::ptr::null()
 }
 
@@ -222,28 +338,54 @@ struct Room {
     turn_users: Vec<String>,
 }
 
-fn serve(room: Arc<Mutex<Room>>, me: usize, mut ws: tungstenite::WebSocket<TcpStream>, out: mpsc::Receiver<String>) {
-    ws.get_mut().set_read_timeout(Some(Duration::from_millis(5))).unwrap();
+fn serve(
+    room: Arc<Mutex<Room>>,
+    me: usize,
+    mut ws: tungstenite::WebSocket<TcpStream>,
+    out: mpsc::Receiver<String>,
+) {
+    ws.get_mut()
+        .set_read_timeout(Some(Duration::from_millis(5)))
+        .unwrap();
     loop {
         while let Ok(text) = out.try_recv() {
-            if ws.send(Message::text(text)).is_err() { return; }
+            if ws.send(Message::text(text)).is_err() {
+                return;
+            }
         }
         let message = match ws.read() {
             Ok(Message::Text(t)) => t.to_string(),
             Ok(Message::Close(_)) => return,
             Ok(_) => continue,
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => continue,
+            Err(tungstenite::Error::Io(e))
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
             Err(_) => return,
         };
         let m: Value = serde_json::from_str(&message).unwrap();
         let member = me as u64 + 1;
-        let send = |room: &Room, who: usize, v: Value| { let _ = room.out[who].send(v.to_string()); };
+        let send = |room: &Room, who: usize, v: Value| {
+            let _ = room.out[who].send(v.to_string());
+        };
         match m["type"].as_str() {
             Some("sfu_offer") => {
-                let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":m["sdp"]}}));
+                let r = api(
+                    "POST",
+                    "sessions/new",
+                    &json!({"sessionDescription":{"type":"offer","sdp":m["sdp"]}}),
+                );
                 let mut room = room.lock().unwrap();
                 room.sessions[me] = Some(r["sessionId"].as_str().unwrap().to_string());
-                send(&room, me, json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]}));
+                send(
+                    &room,
+                    me,
+                    json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]}),
+                );
             }
             Some("sfu_connected") => {
                 let session = room.lock().unwrap().sessions[me].clone().unwrap();
@@ -259,7 +401,11 @@ fn serve(room: Arc<Mutex<Room>>, me: usize, mut ws: tungstenite::WebSocket<TcpSt
                     let sub_other = allocate(&theirs_session, member, Some(&session));
                     let r = room.lock().unwrap();
                     send(&r, me, json!({"type":"sfu_channels","channels":sub_me}));
-                    send(&r, other, json!({"type":"sfu_channels","channels":sub_other}));
+                    send(
+                        &r,
+                        other,
+                        json!({"type":"sfu_channels","channels":sub_other}),
+                    );
                 }
             }
             Some("sfu_turn") => {
@@ -273,7 +419,9 @@ fn serve(room: Arc<Mutex<Room>>, me: usize, mut ws: tungstenite::WebSocket<TcpSt
                 let mut r = room.lock().unwrap();
                 r.ready[me] = true;
                 if r.ready == [true, true] {
-                    for who in 0..2 { send(&r, who, json!({"type":"sfu_ready"})); }
+                    for who in 0..2 {
+                        send(&r, who, json!({"type":"sfu_ready"}));
+                    }
                 }
             }
             _ => {}
@@ -282,12 +430,17 @@ fn serve(room: Arc<Mutex<Room>>, me: usize, mut ws: tungstenite::WebSocket<TcpSt
 }
 
 fn percentile(sorted: &[f64], p: f64) -> f64 {
-    if sorted.is_empty() { return f64::NAN; }
+    if sorted.is_empty() {
+        return f64::NAN;
+    }
     sorted[((sorted.len() as f64 - 1.0) * p).round() as usize]
 }
 
 fn env_or(name: &str, default: u64) -> u64 {
-    std::env::var(name).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
 }
 
 #[test]
@@ -296,16 +449,27 @@ fn probe_sfu_one_way_delay() {
     epoch();
     let seconds = env_or("DHD_PROBE_SECONDS", 30);
     let riders = env_or("DHD_PROBE_RIDERS", 1).clamp(1, 10) as u8;
-    let riders = [riders, env_or("DHD_PROBE_RIDERS_B", riders as u64).clamp(1, 10) as u8];
+    let riders = [
+        riders,
+        env_or("DHD_PROBE_RIDERS_B", riders as u64).clamp(1, 10) as u8,
+    ];
     let size = env_or("DHD_PROBE_BYTES", 150).clamp(16, 834) as usize;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = CString::new(format!("ws://{}/", listener.local_addr().unwrap())).unwrap();
     let room = Arc::new(Mutex::new(Room::default()));
-    let rx: Vec<Arc<Mutex<Rx>>> = (0..2).map(|_| Arc::new(Mutex::new(Rx::default()))).collect();
+    let rx: Vec<Arc<Mutex<Rx>>> = (0..2)
+        .map(|_| Arc::new(Mutex::new(Rx::default())))
+        .collect();
     let mut clients = vec![];
     let mut servers = vec![];
     for (me, rx) in rx.iter().enumerate() {
-        let h = WsHandler { ctx: Arc::as_ptr(rx) as *mut c_void, on_open: Some(on_open), on_message: Some(on_message), on_close: Some(on_close), on_tick: None };
+        let h = WsHandler {
+            ctx: Arc::as_ptr(rx) as *mut c_void,
+            on_open: Some(on_open),
+            on_message: Some(on_message),
+            on_close: Some(on_close),
+            on_tick: None,
+        };
         clients.push(unsafe { ws_start(url.as_ptr(), &h) } as usize);
         let (stream, _) = listener.accept().unwrap();
         let ws = tungstenite::accept(stream).unwrap();
@@ -315,19 +479,31 @@ fn probe_sfu_one_way_delay() {
         servers.push(std::thread::spawn(move || serve(r, me, ws, out)));
     }
     let until = Instant::now() + Duration::from_secs(10);
-    while !rx.iter().all(|r| r.lock().unwrap().open) { assert!(Instant::now() < until, "no WebSocket"); std::thread::sleep(Duration::from_millis(5)); }
+    while !rx.iter().all(|r| r.lock().unwrap().open) {
+        assert!(Instant::now() < until, "no WebSocket");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let players = json!([{"memberId":1,"slot":0},{"memberId":2,"slot":1}]);
     {
         let r = room.lock().unwrap();
-        for who in 0..2 { r.out[who].send(json!({"type":"start","startAt":RACE,"players":players}).to_string()).unwrap(); }
+        for who in 0..2 {
+            r.out[who]
+                .send(json!({"type":"start","startAt":RACE,"players":players}).to_string())
+                .unwrap();
+        }
     }
     let setup = Instant::now();
     let until = setup + Duration::from_secs(40);
-    while !rx.iter().all(|r| r.lock().unwrap().ready) { assert!(Instant::now() < until, "SFU setup timed out"); std::thread::sleep(Duration::from_millis(5)); }
+    while !rx.iter().all(|r| r.lock().unwrap().ready) {
+        assert!(Instant::now() < until, "SFU setup timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     eprintln!("probe: SFU ready {} ms after start; {seconds} s at 30 Hz, {riders:?} snapshot(s) of {size} bytes per tick per client",
         setup.elapsed().as_millis());
     std::thread::sleep(Duration::from_millis(500));
-    for r in &rx { r.lock().unwrap().clear(); }
+    for r in &rx {
+        r.lock().unwrap().clear();
+    }
     let start = Instant::now();
     let ticks = seconds * 30;
     for tick in 0..ticks {
@@ -340,12 +516,22 @@ fn probe_sfu_one_way_delay() {
         }
     }
     std::thread::sleep(Duration::from_millis(1500));
-    for (me, r) in rx.iter().enumerate() { r.lock().unwrap().report(&format!("client {me}"), ticks); }
-    for c in clients { unsafe { ws_stop(c as *mut WsConn) }; }
-    for s in servers { let _ = s.join(); }
+    for (me, r) in rx.iter().enumerate() {
+        r.lock().unwrap().report(&format!("client {me}"), ticks);
+    }
+    for c in clients {
+        unsafe { ws_stop(c as *mut WsConn) };
+    }
+    for s in servers {
+        let _ = s.join();
+    }
     let users = std::mem::take(&mut room.lock().unwrap().turn_users);
-    for user in &users { revoke_turn(user); }
-    if !users.is_empty() { eprintln!("probe: revoked {} TURN credential(s)", users.len()); }
+    for user in &users {
+        revoke_turn(user);
+    }
+    if !users.is_empty() {
+        eprintln!("probe: revoked {} TURN credential(s)", users.len());
+    }
 }
 
 /// The same two sessions with no thread loop: one thread sends on each tick and busy-polls both
@@ -356,16 +542,24 @@ fn probe_sfu_direct() {
     epoch();
     let seconds = env_or("DHD_PROBE_SECONDS", 30);
     let riders = env_or("DHD_PROBE_RIDERS", 1).clamp(1, 10) as u8;
-    let riders = [riders, env_or("DHD_PROBE_RIDERS_B", riders as u64).clamp(1, 10) as u8];
+    let riders = [
+        riders,
+        env_or("DHD_PROBE_RIDERS_B", riders as u64).clamp(1, 10) as u8,
+    ];
     let size = env_or("DHD_PROBE_BYTES", 150).clamp(16, 834) as usize;
     let nap = Duration::from_micros(env_or("DHD_PROBE_SLEEP_US", 0));
     let mut c: Vec<Sfu> = vec![];
     let mut sessions = vec![];
     for _ in 0..2 {
         let (mut sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
-        let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+        let r = api(
+            "POST",
+            "sessions/new",
+            &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}),
+        );
         sessions.push(r["sessionId"].as_str().unwrap().to_string());
-        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]})).unwrap();
+        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]}))
+            .unwrap();
         sfu.signal(&json!({"type":"start","startAt":RACE,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1}]})).unwrap();
         c.push(sfu);
     }
@@ -376,7 +570,9 @@ fn probe_sfu_direct() {
             let (t, frames) = c[who].poll().unwrap();
             text[who] = t.iter().any(|m| m["type"] == "sfu_connected");
             let now = Instant::now();
-            for (_, f) in frames { rx[who].record(&f, now); }
+            for (_, f) in frames {
+                rx[who].record(&f, now);
+            }
         }
         text
     };
@@ -385,17 +581,23 @@ fn probe_sfu_direct() {
     while connected != [true, true] {
         assert!(Instant::now() < until, "SFU connect timed out");
         let t = poll(&mut c, &mut rx);
-        for who in 0..2 { connected[who] |= t[who]; }
+        for who in 0..2 {
+            connected[who] |= t[who];
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
     for who in 0..2 {
         let channels = allocate(&sessions[who], who as u64 + 1, None);
-        c[who].signal(&json!({"type":"sfu_channels","channels":channels})).unwrap();
+        c[who]
+            .signal(&json!({"type":"sfu_channels","channels":channels}))
+            .unwrap();
     }
     for who in 0..2 {
         let other = 1 - who;
         let channels = allocate(&sessions[who], other as u64 + 1, Some(&sessions[other]));
-        c[who].signal(&json!({"type":"sfu_channels","channels":channels})).unwrap();
+        c[who]
+            .signal(&json!({"type":"sfu_channels","channels":channels}))
+            .unwrap();
     }
     let until = Instant::now() + Duration::from_secs(15);
     while !(c[0].usable() && c[1].usable()) {
@@ -403,11 +605,17 @@ fn probe_sfu_direct() {
         poll(&mut c, &mut rx);
         std::thread::sleep(Duration::from_millis(1));
     }
-    for s in c.iter_mut() { s.released = true; }
+    for s in c.iter_mut() {
+        s.released = true;
+    }
     eprintln!("probe: direct, SFU ready; {seconds} s at 30 Hz, {riders:?} snapshot(s) of {size} bytes per tick per client, {} us between polls", nap.as_micros());
     let settle = Instant::now() + Duration::from_millis(500);
-    while Instant::now() < settle { poll(&mut c, &mut rx); }
-    for r in rx.iter_mut() { r.clear(); }
+    while Instant::now() < settle {
+        poll(&mut c, &mut rx);
+    }
+    for r in rx.iter_mut() {
+        r.clear();
+    }
     let start = Instant::now();
     let ticks = seconds * 30;
     let mut tick = 0;
@@ -418,19 +626,30 @@ fn probe_sfu_direct() {
     while Instant::now() < end {
         let now = Instant::now();
         loop_max = loop_max.max(now - last);
-        if now - last > Duration::from_millis(5) { loops_over_5ms += 1; }
+        if now - last > Duration::from_millis(5) {
+            loops_over_5ms += 1;
+        }
         last = now;
         if tick < ticks && Instant::now() >= start + Duration::from_micros(tick * 33_333) {
             for who in 0..2 {
-                for rider in 0..riders[who] { c[who].send(&snapshot(who, rider, tick, size)).unwrap(); }
+                for rider in 0..riders[who] {
+                    c[who].send(&snapshot(who, rider, tick, size)).unwrap();
+                }
             }
             tick += 1;
         }
         poll(&mut c, &mut rx);
-        if !nap.is_zero() { std::thread::sleep(nap); }
+        if !nap.is_zero() {
+            std::thread::sleep(nap);
+        }
     }
-    for (who, r) in rx.iter().enumerate() { r.report(&format!("direct client {who}"), ticks); }
-    eprintln!("probe: direct loop: longest round {:.1} ms, {loops_over_5ms} rounds over 5 ms", loop_max.as_secs_f64() * 1e3);
+    for (who, r) in rx.iter().enumerate() {
+        r.report(&format!("direct client {who}"), ticks);
+    }
+    eprintln!(
+        "probe: direct loop: longest round {:.1} ms, {loops_over_5ms} rounds over 5 ms",
+        loop_max.as_secs_f64() * 1e3
+    );
     for (who, s) in c.iter().enumerate() {
         let mut tx: Vec<f64> = s.probe.tx_lag.clone();
         tx.sort_by(|a, b| a.partial_cmp(b).unwrap());
@@ -449,37 +668,80 @@ fn probe_turn_allocate() {
     let (host, port) = super::turns_server(&message["urls"]).unwrap();
     let start = Instant::now();
     let link = crate::relay::Link::open(&host, port, Arc::new(|| {}));
-    let mut client = crate::turn::Client::new(&user, message["credential"].as_str().unwrap(), Instant::now());
+    let mut client = crate::turn::Client::new(
+        &user,
+        message["credential"].as_str().unwrap(),
+        Instant::now(),
+    );
     let until = start + Duration::from_secs(15);
-    while !link.ready() { assert!(!link.failed() && Instant::now() < until, "TLS link"); std::thread::sleep(Duration::from_millis(1)); }
-    eprintln!("probe: TLS to {host}:{port} ready after {} ms", start.elapsed().as_millis());
+    while !link.ready() {
+        assert!(!link.failed() && Instant::now() < until, "TLS link");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    eprintln!(
+        "probe: TLS to {host}:{port} ready after {} ms",
+        start.elapsed().as_millis()
+    );
     let pump = |client: &mut crate::turn::Client| {
         link.write(&client.output());
         let (bytes, _) = link.take();
-        if !bytes.is_empty() { client.receive(&bytes, Instant::now()); }
+        if !bytes.is_empty() {
+            client.receive(&bytes, Instant::now());
+        }
         client.tick(Instant::now());
         std::thread::sleep(Duration::from_millis(1));
     };
     while client.relayed.is_none() {
-        assert!(Instant::now() < until && client.failed().is_none() && !link.failed(), "allocation: {:?}", client.failed());
+        assert!(
+            Instant::now() < until && client.failed().is_none() && !link.failed(),
+            "allocation: {:?}",
+            client.failed()
+        );
         pump(&mut client);
     }
-    eprintln!("probe: TURN allocation after {} ms", start.elapsed().as_millis());
+    eprintln!(
+        "probe: TURN allocation after {} ms",
+        start.elapsed().as_millis()
+    );
     let (_sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
-    let answer = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
-    let peer = std::env::var("DHD_PROBE_PEER").ok().and_then(|p| p.parse().ok()).unwrap_or_else(|| {
-        let line = answer["sessionDescription"]["sdp"].as_str().unwrap().lines()
-            .find(|l| l.starts_with("a=candidate:") && l.split_whitespace().nth(2).is_some_and(|t| t.eq_ignore_ascii_case("udp"))).unwrap().to_string();
-        let p: Vec<&str> = line.split_whitespace().collect();
-        format!("{}:{}", p[4], p[5]).parse().unwrap()
-    });
+    let answer = api(
+        "POST",
+        "sessions/new",
+        &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}),
+    );
+    let peer = std::env::var("DHD_PROBE_PEER")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or_else(|| {
+            let line = answer["sessionDescription"]["sdp"]
+                .as_str()
+                .unwrap()
+                .lines()
+                .find(|l| {
+                    l.starts_with("a=candidate:")
+                        && l.split_whitespace()
+                            .nth(2)
+                            .is_some_and(|t| t.eq_ignore_ascii_case("udp"))
+                })
+                .unwrap()
+                .to_string();
+            let p: Vec<&str> = line.split_whitespace().collect();
+            format!("{}:{}", p[4], p[5]).parse().unwrap()
+        });
     let bind = Instant::now();
     client.send_to(peer, &[0u8; 20], bind);
     while client.output_pending() || client.binding() {
-        assert!(Instant::now() < bind + Duration::from_secs(5) && client.failed().is_none(), "channel bind: {:?}", client.failed());
+        assert!(
+            Instant::now() < bind + Duration::from_secs(5) && client.failed().is_none(),
+            "channel bind: {:?}",
+            client.failed()
+        );
         pump(&mut client);
     }
-    eprintln!("probe: channel to the SFU bound after {} ms", bind.elapsed().as_millis());
+    eprintln!(
+        "probe: channel to the SFU bound after {} ms",
+        bind.elapsed().as_millis()
+    );
     client.close(Instant::now());
     link.write(&client.output());
     revoke_turn(&user);
@@ -495,35 +757,77 @@ fn probe_turn_tls_no_credentials() {
     let link = crate::relay::Link::open("turn.cloudflare.com", 443, Arc::new(|| {}));
     let mut client = crate::turn::Client::new("not-a-user", "not-a-credential", Instant::now());
     let until = start + Duration::from_secs(15);
-    while !link.ready() { assert!(!link.failed() && Instant::now() < until, "TLS link"); std::thread::sleep(Duration::from_millis(1)); }
-    eprintln!("probe: TLS to turn.cloudflare.com:443 ready after {} ms", start.elapsed().as_millis());
+    while !link.ready() {
+        assert!(!link.failed() && Instant::now() < until, "TLS link");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    eprintln!(
+        "probe: TLS to turn.cloudflare.com:443 ready after {} ms",
+        start.elapsed().as_millis()
+    );
     while client.failed().is_none() {
         assert!(Instant::now() < until && !link.failed(), "no TURN answer");
         link.write(&client.output());
         let (bytes, _) = link.take();
-        if !bytes.is_empty() { client.receive(&bytes, Instant::now()); }
+        if !bytes.is_empty() {
+            client.receive(&bytes, Instant::now());
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
-    assert!(client.challenged(), "no 401 challenge with a realm and nonce");
+    assert!(
+        client.challenged(),
+        "no 401 challenge with a realm and nonce"
+    );
     // 401 or 400 (Cloudflare's answer to a username it can't parse): refused either way.
-    assert!(client.failed().is_some_and(|f| f.starts_with("TURN error 4")), "{:?}", client.failed());
-    eprintln!("probe: TURN challenge and refusal after {} ms", start.elapsed().as_millis());
+    assert!(
+        client
+            .failed()
+            .is_some_and(|f| f.starts_with("TURN error 4")),
+        "{:?}",
+        client.failed()
+    );
+    eprintln!(
+        "probe: TURN challenge and refusal after {} ms",
+        start.elapsed().as_millis()
+    );
 }
 
 /// Allocations on `session` (publications, or subscriptions to `publisher`), each item checked.
-fn try_allocate(session: &str, member: u64, publisher: Option<&str>) -> std::result::Result<Vec<Value>, String> {
+fn try_allocate(
+    session: &str,
+    member: u64,
+    publisher: Option<&str>,
+) -> std::result::Result<Vec<Value>, String> {
     let (app, token) = (secret("REALTIME_APP_ID"), secret("REALTIME_APP_TOKEN"));
-    let policies = [json!({"dataChannelName":"state","ordered":false,"maxRetransmits":0}),
-                    json!({"dataChannelName":"events","ordered":true})];
-    let channels: Vec<Value> = policies.iter().map(|p| {
-        let mut p = p.clone();
-        p["location"] = json!(if publisher.is_some() { "remote" } else { "local" });
-        if let Some(s) = publisher { p["sessionId"] = json!(s); }
-        p
-    }).collect();
-    let r = try_call("POST", &format!("/v1/apps/{app}/sessions/{session}/datachannels/new"), &token, &json!({"dataChannels": channels}))?;
+    let policies = [
+        json!({"dataChannelName":"state","ordered":false,"maxRetransmits":0}),
+        json!({"dataChannelName":"events","ordered":true}),
+    ];
+    let channels: Vec<Value> = policies
+        .iter()
+        .map(|p| {
+            let mut p = p.clone();
+            p["location"] = json!(if publisher.is_some() {
+                "remote"
+            } else {
+                "local"
+            });
+            if let Some(s) = publisher {
+                p["sessionId"] = json!(s);
+            }
+            p
+        })
+        .collect();
+    let r = try_call(
+        "POST",
+        &format!("/v1/apps/{app}/sessions/{session}/datachannels/new"),
+        &token,
+        &json!({"dataChannels": channels}),
+    )?;
     let items = r["dataChannels"].as_array().ok_or("no dataChannels")?;
-    if items.len() != 2 { return Err(format!("{} items", items.len())); }
+    if items.len() != 2 {
+        return Err(format!("{} items", items.len()));
+    }
     items.iter().map(|c| {
         if let Some(code) = c.get("errorCode") { return Err(format!("item error {code}")); }
         let id = c["id"].as_u64().filter(|id| *id < 65535).ok_or("no channel id")?;
@@ -550,9 +854,14 @@ fn probe_parallel_subscriptions() {
     let mut sessions: Vec<String> = vec![];
     for _ in 0..n {
         let (mut sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
-        let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+        let r = api(
+            "POST",
+            "sessions/new",
+            &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}),
+        );
         sessions.push(r["sessionId"].as_str().unwrap().to_string());
-        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]})).unwrap();
+        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]}))
+            .unwrap();
         c.push(sfu);
     }
     let poll_all = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>| -> Vec<bool> {
@@ -569,39 +878,53 @@ fn probe_parallel_subscriptions() {
     let mut connected = vec![false; n];
     while connected.iter().any(|x| !x) {
         assert!(Instant::now() < until, "SFU connect timed out");
-        for (k, x) in poll_all(&mut c, &mut got).into_iter().enumerate() { connected[k] |= x; }
+        for (k, x) in poll_all(&mut c, &mut got).into_iter().enumerate() {
+            connected[k] |= x;
+        }
         std::thread::sleep(Duration::from_millis(1));
     }
     for who in 0..n {
         let channels = allocate(&sessions[who], who as u64 + 1, None);
-        c[who].signal(&json!({"type":"sfu_channels","channels":channels})).unwrap();
+        c[who]
+            .signal(&json!({"type":"sfu_channels","channels":channels}))
+            .unwrap();
     }
-    let players: Vec<Value> = (0..n).map(|who| json!({"memberId": who + 1, "slot": who})).collect();
+    let players: Vec<Value> = (0..n)
+        .map(|who| json!({"memberId": who + 1, "slot": who}))
+        .collect();
     eprintln!("probe: {n} sessions connected and published; {rounds} rounds, {parallel} subscription call(s) at once per subscriber, every subscriber at once");
-    let (mut calls, mut failed, mut reused, mut conflicts, mut undelivered, mut unopened) = (0, 0, 0, 0, 0, 0);
+    let (mut calls, mut failed, mut reused, mut conflicts, mut undelivered, mut unopened) =
+        (0, 0, 0, 0, 0, 0);
     let mut ms_all: Vec<f64> = vec![];
     let mut seen_ids: Vec<std::collections::HashSet<u64>> = vec![Default::default(); n];
     for round in 0..rounds {
         let started = Instant::now();
-        let workers: Vec<_> = (0..n).map(|sub| {
-            let sessions = sessions.clone();
-            std::thread::spawn(move || {
-                let pubs: Vec<usize> = (0..n).filter(|p| *p != sub).collect();
-                let mut out = vec![];
-                for chunk in pubs.chunks(parallel) {
-                    let calls: Vec<_> = chunk.iter().map(|&p| {
-                        let (s, ps) = (sessions[sub].clone(), sessions[p].clone());
-                        std::thread::spawn(move || {
-                            let t = Instant::now();
-                            let r = try_allocate(&s, p as u64 + 1, Some(&ps));
-                            (p, r, t.elapsed().as_secs_f64() * 1e3)
-                        })
-                    }).collect();
-                    for h in calls { out.push(h.join().unwrap()); }
-                }
-                out
+        let workers: Vec<_> = (0..n)
+            .map(|sub| {
+                let sessions = sessions.clone();
+                std::thread::spawn(move || {
+                    let pubs: Vec<usize> = (0..n).filter(|p| *p != sub).collect();
+                    let mut out = vec![];
+                    for chunk in pubs.chunks(parallel) {
+                        let calls: Vec<_> = chunk
+                            .iter()
+                            .map(|&p| {
+                                let (s, ps) = (sessions[sub].clone(), sessions[p].clone());
+                                std::thread::spawn(move || {
+                                    let t = Instant::now();
+                                    let r = try_allocate(&s, p as u64 + 1, Some(&ps));
+                                    (p, r, t.elapsed().as_secs_f64() * 1e3)
+                                })
+                            })
+                            .collect();
+                        for h in calls {
+                            out.push(h.join().unwrap());
+                        }
+                    }
+                    out
+                })
             })
-        }).collect();
+            .collect();
         while !workers.iter().all(|w| w.is_finished()) {
             poll_all(&mut c, &mut got);
             std::thread::sleep(Duration::from_millis(1));
@@ -616,11 +939,15 @@ fn probe_parallel_subscriptions() {
                     Ok(channels) => {
                         for ch in &channels {
                             let id = ch["channelId"].as_u64().unwrap();
-                            if !seen_ids[sub].insert(id) { reused += 1; }
+                            if !seen_ids[sub].insert(id) {
+                                reused += 1;
+                            }
                             remote[sub].push(id);
                         }
 
-                        if let Err(e) = c[sub].signal(&json!({"type":"sfu_channels","channels":channels})) {
+                        if let Err(e) =
+                            c[sub].signal(&json!({"type":"sfu_channels","channels":channels}))
+                        {
                             conflicts += 1;
                             eprintln!("probe: round {round}: subscriber {sub} refused publisher {p}'s channels: {e}");
                         }
@@ -628,31 +955,54 @@ fn probe_parallel_subscriptions() {
                     Err(e) => {
                         failed += 1;
                         round_failed += 1;
-                        eprintln!("probe: round {round}: subscriber {sub} <- publisher {p} failed: {e}");
+                        eprintln!(
+                            "probe: round {round}: subscriber {sub} <- publisher {p} failed: {e}"
+                        );
                     }
                 }
             }
         }
         let calls_ms = started.elapsed().as_secs_f64() * 1e3;
         let until = Instant::now() + Duration::from_secs(10);
-        let open = |c: &mut Vec<Sfu>| c.iter_mut().all(|s| s.waiting.is_empty() && s.channels.iter().all(|ch| s.rtc.channel(ch.id).is_some()));
+        let open = |c: &mut Vec<Sfu>| {
+            c.iter_mut().all(|s| {
+                s.waiting.is_empty() && s.channels.iter().all(|ch| s.rtc.channel(ch.id).is_some())
+            })
+        };
         while !open(&mut c) && Instant::now() < until {
             poll_all(&mut c, &mut got);
             std::thread::sleep(Duration::from_millis(1));
         }
-        if !open(&mut c) { unopened += 1; eprintln!("probe: round {round}: channels not all open after 10 s"); }
+        if !open(&mut c) {
+            unopened += 1;
+            eprintln!("probe: round {round}: channels not all open after 10 s");
+        }
         let race = 1_000 + round;
-        for g in got.iter_mut() { g.clear(); }
+        for g in got.iter_mut() {
+            g.clear();
+        }
         for s in c.iter_mut() {
-            s.signal(&json!({"type":"start","startAt":race,"players":players})).unwrap();
+            s.signal(&json!({"type":"start","startAt":race,"players":players}))
+                .unwrap();
             s.released = true;
         }
         for (who, s) in c.iter_mut().enumerate() {
-            for k in 0..3u8 { s.send(&[6, who as u8, round as u8, k]).unwrap(); }
+            for k in 0..3u8 {
+                s.send(&[6, who as u8, round as u8, k]).unwrap();
+            }
             s.send(&[5, who as u8, 0, 0, 1]).unwrap();
         }
-        let delivered = |got: &Vec<Vec<Vec<u8>>>| (0..n).all(|sub| (0..n).filter(|p| *p != sub)
-            .all(|p| got[sub].iter().filter(|f| f[0] == 6 && f[1] == p as u8 && f[2] == round as u8).count() == 3));
+        let delivered = |got: &Vec<Vec<Vec<u8>>>| {
+            (0..n).all(|sub| {
+                (0..n).filter(|p| *p != sub).all(|p| {
+                    got[sub]
+                        .iter()
+                        .filter(|f| f[0] == 6 && f[1] == p as u8 && f[2] == round as u8)
+                        .count()
+                        == 3
+                })
+            })
+        };
         let until = Instant::now() + Duration::from_secs(5);
         while !delivered(&got) && Instant::now() < until {
             poll_all(&mut c, &mut got);
@@ -666,38 +1016,104 @@ fn probe_parallel_subscriptions() {
                 poll_all(&mut c, &mut got);
                 std::thread::sleep(Duration::from_millis(1));
             }
-            eprintln!("probe: round {round}: events {} 5 s + {} ms", if delivered(&got) { "all came after" } else { "still missing after" }, late.elapsed().as_millis());
+            eprintln!(
+                "probe: round {round}: events {} 5 s + {} ms",
+                if delivered(&got) {
+                    "all came after"
+                } else {
+                    "still missing after"
+                },
+                late.elapsed().as_millis()
+            );
             undelivered += 1;
             for sub in 0..n {
-                let from: Vec<u8> = (0..n as u8).filter(|p| got[sub].iter().any(|f| f[0] == 6 && f[1] == *p && f[2] == round as u8)).collect();
+                let from: Vec<u8> = (0..n as u8)
+                    .filter(|p| {
+                        got[sub]
+                            .iter()
+                            .any(|f| f[0] == 6 && f[1] == *p && f[2] == round as u8)
+                    })
+                    .collect();
                 eprintln!("probe: round {round}: subscriber {sub} got events from {from:?}");
             }
         }
-        eprintln!("probe: round {round}: {} calls in {calls_ms:.0} ms, {round_failed} failed, events {}", n * (n - 1),
-            if ok { "delivered both ways for every pair" } else { "MISSING" });
+        eprintln!(
+            "probe: round {round}: {} calls in {calls_ms:.0} ms, {round_failed} failed, events {}",
+            n * (n - 1),
+            if ok {
+                "delivered both ways for every pair"
+            } else {
+                "MISSING"
+            }
+        );
         // Close the subscriptions; the next round makes them again on the same sessions.
         for sub in 0..n {
-            if remote[sub].is_empty() { continue; }
+            if remote[sub].is_empty() {
+                continue;
+            }
             let ids: Vec<Value> = remote[sub].iter().map(|id| json!({"id": id})).collect();
-            let r = try_call("PUT", &format!("/v1/apps/{}/sessions/{}/datachannels/close", secret("REALTIME_APP_ID"), sessions[sub]),
-                &secret("REALTIME_APP_TOKEN"), &json!({"dataChannels": ids}));
-            if let Err(e) = r { eprintln!("probe: round {round}: close on subscriber {sub} failed: {e}"); }
-            c[sub].signal(&json!({"type":"sfu_closed","channelIds":remote[sub]})).unwrap();
+            let r = try_call(
+                "PUT",
+                &format!(
+                    "/v1/apps/{}/sessions/{}/datachannels/close",
+                    secret("REALTIME_APP_ID"),
+                    sessions[sub]
+                ),
+                &secret("REALTIME_APP_TOKEN"),
+                &json!({"dataChannels": ids}),
+            );
+            if let Err(e) = r {
+                eprintln!("probe: round {round}: close on subscriber {sub} failed: {e}");
+            }
+            c[sub]
+                .signal(&json!({"type":"sfu_closed","channelIds":remote[sub]}))
+                .unwrap();
         }
         // Until str0m let go of every closed stream (DHD_PROBE_SETTLE_MS at most, default 300).
         let closed_at = Instant::now();
         let settle = closed_at + Duration::from_millis(env_or("DHD_PROBE_SETTLE_MS", 300));
-        let held = |c: &mut Vec<Sfu>| (0..n).map(|s| remote[s].iter().filter(|id| c[s].rtc.direct_api().channel_id_by_sctp_stream_id(**id as u16).is_some()).count()).sum::<usize>();
-        while Instant::now() < settle && held(&mut c) > 0 { poll_all(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+        let held = |c: &mut Vec<Sfu>| {
+            (0..n)
+                .map(|s| {
+                    remote[s]
+                        .iter()
+                        .filter(|id| {
+                            c[s].rtc
+                                .direct_api()
+                                .channel_id_by_sctp_stream_id(**id as u16)
+                                .is_some()
+                        })
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        while Instant::now() < settle && held(&mut c) > 0 {
+            poll_all(&mut c, &mut got);
+            std::thread::sleep(Duration::from_millis(1));
+        }
         let mut kinds: Vec<String> = vec![];
         for s in 0..n {
             for id in &remote[s] {
-                if c[s].rtc.direct_api().channel_id_by_sctp_stream_id(*id as u16).is_none() { continue; }
+                if c[s]
+                    .rtc
+                    .direct_api()
+                    .channel_id_by_sctp_stream_id(*id as u16)
+                    .is_none()
+                {
+                    continue;
+                }
                 kinds.push(format!("{s}:{id}"));
             }
         }
-        eprintln!("probe: round {round}: closed streams still held after {} ms: {} {kinds:?}", closed_at.elapsed().as_millis(), held(&mut c));
-        while Instant::now() < settle { poll_all(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+        eprintln!(
+            "probe: round {round}: closed streams still held after {} ms: {} {kinds:?}",
+            closed_at.elapsed().as_millis(),
+            held(&mut c)
+        );
+        while Instant::now() < settle {
+            poll_all(&mut c, &mut got);
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
     ms_all.sort_by(|a, b| a.partial_cmp(b).unwrap());
     eprintln!("probe: {calls} subscription calls, {failed} failed, {unopened} round(s) with channels not open, {undelivered} round(s) with events missing; \
@@ -722,74 +1138,152 @@ fn probe_unannounced_subscription_close() {
     let mut sessions: Vec<String> = vec![];
     let connect = |c: &mut Vec<Sfu>, sessions: &mut Vec<String>| {
         let (mut sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
-        let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+        let r = api(
+            "POST",
+            "sessions/new",
+            &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}),
+        );
         sessions.push(r["sessionId"].as_str().unwrap().to_string());
-        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]})).unwrap();
+        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]}))
+            .unwrap();
         c.push(sfu);
     };
     let poll = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>| {
-        for (k, s) in c.iter_mut().enumerate() { let (_, f) = s.poll().expect("association"); got[k].extend(f.into_iter().map(|(_, f)| f)); }
+        for (k, s) in c.iter_mut().enumerate() {
+            let (_, f) = s.poll().expect("association");
+            got[k].extend(f.into_iter().map(|(_, f)| f));
+        }
     };
     let wait = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>, ms: u64| {
         let until = Instant::now() + Duration::from_millis(ms);
-        while Instant::now() < until { poll(c, got); std::thread::sleep(Duration::from_millis(1)); }
+        while Instant::now() < until {
+            poll(c, got);
+            std::thread::sleep(Duration::from_millis(1));
+        }
     };
     let mut got: Vec<Vec<Vec<u8>>> = vec![vec![]; 3];
-    for _ in 0..3 { connect(&mut c, &mut sessions); }
+    for _ in 0..3 {
+        connect(&mut c, &mut sessions);
+    }
     let until = Instant::now() + Duration::from_secs(20);
-    while !c.iter().all(|s| s.connected) { assert!(Instant::now() < until, "SFU connect timed out"); poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
-    for k in 0..3 { let ch = allocate(&sessions[k], k as u64 + 1, None); c[k].signal(&json!({"type":"sfu_channels","channels":ch})).unwrap(); }
+    while !c.iter().all(|s| s.connected) {
+        assert!(Instant::now() < until, "SFU connect timed out");
+        poll(&mut c, &mut got);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for k in 0..3 {
+        let ch = allocate(&sessions[k], k as u64 + 1, None);
+        c[k].signal(&json!({"type":"sfu_channels","channels":ch}))
+            .unwrap();
+    }
     let (app, token) = (secret("REALTIME_APP_ID"), secret("REALTIME_APP_TOKEN"));
     let close = |session: &str, ids: &[u64]| {
         let list: Vec<Value> = ids.iter().map(|id| json!({"id": id})).collect();
-        let r = try_call("PUT", &format!("/v1/apps/{app}/sessions/{session}/datachannels/close"), &token, &json!({"dataChannels": list}));
-        eprintln!("probe: close {ids:?}: {}", match &r { Ok(v) => v["dataChannels"].to_string(), Err(e) => e.clone() });
+        let r = try_call(
+            "PUT",
+            &format!("/v1/apps/{app}/sessions/{session}/datachannels/close"),
+            &token,
+            &json!({"dataChannels": list}),
+        );
+        eprintln!(
+            "probe: close {ids:?}: {}",
+            match &r {
+                Ok(v) => v["dataChannels"].to_string(),
+                Err(e) => e.clone(),
+            }
+        );
     };
     let listing = |session: &str| {
         let r = api("GET", &format!("sessions/{session}"), &Value::Null);
-        let items: Vec<String> = r["dataChannels"].as_array().map_or(vec![], |a| a.iter().map(|x| format!("{}:{}:{}:{}",
-            x["id"], x["dataChannelName"].as_str().unwrap_or("?"), x["location"].as_str().unwrap_or("?"), x["status"].as_str().unwrap_or("-"))).collect());
+        let items: Vec<String> = r["dataChannels"].as_array().map_or(vec![], |a| {
+            a.iter()
+                .map(|x| {
+                    format!(
+                        "{}:{}:{}:{}",
+                        x["id"],
+                        x["dataChannelName"].as_str().unwrap_or("?"),
+                        x["location"].as_str().unwrap_or("?"),
+                        x["status"].as_str().unwrap_or("-")
+                    )
+                })
+                .collect()
+        });
         eprintln!("probe: Cloudflare lists session 0: {items:?}");
     };
-    let ids = |ch: &[Value]| -> Vec<u64> { ch.iter().map(|x| x["channelId"].as_u64().unwrap()).collect() };
+    let ids = |ch: &[Value]| -> Vec<u64> {
+        ch.iter()
+            .map(|x| x["channelId"].as_u64().unwrap())
+            .collect()
+    };
     let players = json!([{"memberId":1,"slot":0},{"memberId":2,"slot":1},{"memberId":3,"slot":2}]);
     let mut race = 5_000u64;
     // Events from 1 and 2 for 4 s: which reach 0.
     let mut check = |c: &mut Vec<Sfu>, got: &mut Vec<Vec<Vec<u8>>>, label: &str| -> (bool, bool) {
         race += 1;
-        for s in c.iter_mut() { s.signal(&json!({"type":"start","startAt":race,"players":players})).unwrap(); s.released = true; }
-        for g in got.iter_mut() { g.clear(); }
+        for s in c.iter_mut() {
+            s.signal(&json!({"type":"start","startAt":race,"players":players}))
+                .unwrap();
+            s.released = true;
+        }
+        for g in got.iter_mut() {
+            g.clear();
+        }
         let until = Instant::now() + Duration::from_secs(4);
         while Instant::now() < until {
-            for who in 1..3 { let _ = c[who].send(&[6, who as u8, 7]); }
+            for who in 1..3 {
+                let _ = c[who].send(&[6, who as u8, 7]);
+            }
             let t = Instant::now() + Duration::from_millis(100);
-            while Instant::now() < t { poll(c, got); std::thread::sleep(Duration::from_millis(1)); }
+            while Instant::now() < t {
+                poll(c, got);
+                std::thread::sleep(Duration::from_millis(1));
+            }
         }
         let from = |p: u8| got[0].iter().filter(|f| f[0] == 6 && f[1] == p).count();
-        eprintln!("probe: {label}: 0 got {} events from 1, {} from 2 (40 sent by each)", from(1), from(2));
-        for s in c.iter_mut() { s.signal(&json!({"type":"ended"})).unwrap(); }
+        eprintln!(
+            "probe: {label}: 0 got {} events from 1, {} from 2 (40 sent by each)",
+            from(1),
+            from(2)
+        );
+        for s in c.iter_mut() {
+            s.signal(&json!({"type":"ended"})).unwrap();
+        }
         (from(1) > 0, from(2) > 0)
     };
     // The baseline: 0 subscribed to 1 the normal way, then closed with its game knowing.
     let normal = allocate(&sessions[0], 2, Some(&sessions[1]));
-    c[0].signal(&json!({"type":"sfu_channels","channels":normal})).unwrap();
+    c[0].signal(&json!({"type":"sfu_channels","channels":normal}))
+        .unwrap();
     wait(&mut c, &mut got, 1000);
-    eprintln!("probe: a normal subscription of 0 to 1 on {:?}", ids(&normal));
+    eprintln!(
+        "probe: a normal subscription of 0 to 1 on {:?}",
+        ids(&normal)
+    );
     let base = check(&mut c, &mut got, "normal subscription");
     close(&sessions[0], &ids(&normal));
-    c[0].signal(&json!({"type":"sfu_closed","channelIds":ids(&normal)})).unwrap();
+    c[0].signal(&json!({"type":"sfu_closed","channelIds":ids(&normal)}))
+        .unwrap();
     wait(&mut c, &mut got, 3000);
     // The unannounced one: made, then closed, 0's game never told.
     let silent = allocate(&sessions[0], 2, Some(&sessions[1]));
-    eprintln!("probe: a subscription of 0 to 1 its game never hears of, on {:?}", ids(&silent));
+    eprintln!(
+        "probe: a subscription of 0 to 1 its game never hears of, on {:?}",
+        ids(&silent)
+    );
     wait(&mut c, &mut got, 1000);
     close(&sessions[0], &ids(&silent));
     wait(&mut c, &mut got, 3000);
     let again = allocate(&sessions[0], 2, Some(&sessions[1]));
     let fresh = allocate(&sessions[0], 3, Some(&sessions[2]));
-    eprintln!("probe: 0 subscribed again to 1 on {:?} and to 2 on {:?}", ids(&again), ids(&fresh));
-    c[0].signal(&json!({"type":"sfu_channels","channels":again})).unwrap();
-    c[0].signal(&json!({"type":"sfu_channels","channels":fresh})).unwrap();
+    eprintln!(
+        "probe: 0 subscribed again to 1 on {:?} and to 2 on {:?}",
+        ids(&again),
+        ids(&fresh)
+    );
+    c[0].signal(&json!({"type":"sfu_channels","channels":again}))
+        .unwrap();
+    c[0].signal(&json!({"type":"sfu_channels","channels":fresh}))
+        .unwrap();
     wait(&mut c, &mut got, 1000);
     listing(&sessions[0]);
     let after = check(&mut c, &mut got, "after the unannounced close");
@@ -797,14 +1291,20 @@ fn probe_unannounced_subscription_close() {
     if rebuild {
         // The pair closed and made once more, the game knowing (sfu_closed, then sfu_channels).
         close(&sessions[0], &ids(&again));
-        c[0].signal(&json!({"type":"sfu_closed","channelIds":ids(&again)})).unwrap();
+        c[0].signal(&json!({"type":"sfu_closed","channelIds":ids(&again)}))
+            .unwrap();
         wait(&mut c, &mut got, 3000);
         let third = allocate(&sessions[0], 2, Some(&sessions[1]));
         eprintln!("probe: rebuilt: 0 subscribed to 1 on {:?}", ids(&third));
-        c[0].signal(&json!({"type":"sfu_channels","channels":third})).unwrap();
+        c[0].signal(&json!({"type":"sfu_channels","channels":third}))
+            .unwrap();
         wait(&mut c, &mut got, 1000);
         listing(&sessions[0]);
-        rebuilt = Some(check(&mut c, &mut got, "after a rebuild on the same session"));
+        rebuilt = Some(check(
+            &mut c,
+            &mut got,
+            "after a rebuild on the same session",
+        ));
     }
     // A new session for 0 (the room's sfu_reset): its publication and both subscriptions anew.
     c.remove(0);
@@ -816,17 +1316,26 @@ fn probe_unannounced_subscription_close() {
     got.insert(0, vec![]);
     got.truncate(3);
     let until = Instant::now() + Duration::from_secs(20);
-    while !c[0].connected { assert!(Instant::now() < until, "new session connect timed out"); poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+    while !c[0].connected {
+        assert!(Instant::now() < until, "new session connect timed out");
+        poll(&mut c, &mut got);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let own = allocate(&sessions[0], 1, None);
-    c[0].signal(&json!({"type":"sfu_channels","channels":own})).unwrap();
+    c[0].signal(&json!({"type":"sfu_channels","channels":own}))
+        .unwrap();
     for p in 1..3 {
         let ch = allocate(&sessions[0], p as u64 + 1, Some(&sessions[p]));
-        c[0].signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+        c[0].signal(&json!({"type":"sfu_channels","channels":ch}))
+            .unwrap();
     }
     wait(&mut c, &mut got, 1000);
     let renewed = check(&mut c, &mut got, "on a new session");
     eprintln!("probe: from 1, from 2: normal {base:?}, after the unannounced close {after:?}, rebuilt {rebuilt:?}, new session {renewed:?}");
-    assert!(base.0 && renewed == (true, true), "the baseline or the new session failed");
+    assert!(
+        base.0 && renewed == (true, true),
+        "the baseline or the new session failed"
+    );
 }
 
 /// Finding 177: a publisher leaves the room. Sessions 0 and 1 subscribe to 2 and to each other;
@@ -843,44 +1352,107 @@ fn probe_publisher_leaves() {
     let mut sessions = vec![];
     let connect = |c: &mut Vec<Option<Sfu>>, sessions: &mut Vec<String>| {
         let (mut sfu, offer) = Sfu::start(Arc::new(|| {}), false).unwrap();
-        let r = api("POST", "sessions/new", &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}));
+        let r = api(
+            "POST",
+            "sessions/new",
+            &json!({"sessionDescription":{"type":"offer","sdp":offer["sdp"]}}),
+        );
         sessions.push(r["sessionId"].as_str().unwrap().to_string());
-        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]})).unwrap();
+        sfu.signal(&json!({"type":"sfu_answer","sdp":r["sessionDescription"]["sdp"]}))
+            .unwrap();
         c.push(Some(sfu));
     };
     let poll = |c: &mut Vec<Option<Sfu>>, got: &mut Vec<Vec<Vec<u8>>>| {
-        for (k, s) in c.iter_mut().enumerate() { if let Some(s) = s { let (_, f) = s.poll().expect("association"); got[k].extend(f.into_iter().map(|(_, f)| f)); } }
+        for (k, s) in c.iter_mut().enumerate() {
+            if let Some(s) = s {
+                let (_, f) = s.poll().expect("association");
+                got[k].extend(f.into_iter().map(|(_, f)| f));
+            }
+        }
     };
     let mut got: Vec<Vec<Vec<u8>>> = vec![vec![]; 4];
-    for _ in 0..3 { connect(&mut c, &mut sessions); }
+    for _ in 0..3 {
+        connect(&mut c, &mut sessions);
+    }
     let until = Instant::now() + Duration::from_secs(20);
-    while !c.iter().all(|s| s.as_ref().unwrap().connected) { assert!(Instant::now() < until); poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
-    for k in 0..3 { let ch = allocate(&sessions[k], k as u64 + 1, None); c[k].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap(); }
+    while !c.iter().all(|s| s.as_ref().unwrap().connected) {
+        assert!(Instant::now() < until);
+        poll(&mut c, &mut got);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    for k in 0..3 {
+        let ch = allocate(&sessions[k], k as u64 + 1, None);
+        c[k].as_mut()
+            .unwrap()
+            .signal(&json!({"type":"sfu_channels","channels":ch}))
+            .unwrap();
+    }
     let mut held_ids: Vec<Vec<u64>> = vec![vec![]; 2];
     for sub in 0..2 {
         for publ in 0..3 {
-            if publ == sub { continue; }
+            if publ == sub {
+                continue;
+            }
             let ch = allocate(&sessions[sub], publ as u64 + 1, Some(&sessions[publ]));
-            if publ == 2 { held_ids[sub] = ch.iter().map(|x| x["channelId"].as_u64().unwrap()).collect(); }
-            c[sub].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+            if publ == 2 {
+                held_ids[sub] = ch
+                    .iter()
+                    .map(|x| x["channelId"].as_u64().unwrap())
+                    .collect();
+            }
+            c[sub]
+                .as_mut()
+                .unwrap()
+                .signal(&json!({"type":"sfu_channels","channels":ch}))
+                .unwrap();
         }
     }
     let settle = Instant::now() + Duration::from_secs(2);
-    while Instant::now() < settle { poll(&mut c, &mut got); std::thread::sleep(Duration::from_millis(1)); }
+    while Instant::now() < settle {
+        poll(&mut c, &mut got);
+        std::thread::sleep(Duration::from_millis(1));
+    }
     let (app, token) = (secret("REALTIME_APP_ID"), secret("REALTIME_APP_TOKEN"));
     let close = |session: &str, ids: &[u64]| {
         let list: Vec<Value> = ids.iter().map(|id| json!({"id": id})).collect();
-        let r = try_call("PUT", &format!("/v1/apps/{app}/sessions/{session}/datachannels/close"), &token, &json!({"dataChannels": list}));
-        eprintln!("probe: close {} on a session: {}", ids.len(), match &r { Ok(v) => v["dataChannels"].to_string(), Err(e) => e.clone() });
+        let r = try_call(
+            "PUT",
+            &format!("/v1/apps/{app}/sessions/{session}/datachannels/close"),
+            &token,
+            &json!({"dataChannels": list}),
+        );
+        eprintln!(
+            "probe: close {} on a session: {}",
+            ids.len(),
+            match &r {
+                Ok(v) => v["dataChannels"].to_string(),
+                Err(e) => e.clone(),
+            }
+        );
     };
-    let own2: Vec<u64> = c[2].as_ref().unwrap().channels.iter().filter(|x| x.local).map(|x| x.stream as u64).collect();
-    if !subs_first { close(&sessions[2], &own2); }
+    let own2: Vec<u64> = c[2]
+        .as_ref()
+        .unwrap()
+        .channels
+        .iter()
+        .filter(|x| x.local)
+        .map(|x| x.stream as u64)
+        .collect();
+    if !subs_first {
+        close(&sessions[2], &own2);
+    }
     for sub in 0..2 {
         close(&sessions[sub], &held_ids[sub]);
-        c[sub].as_mut().unwrap().signal(&json!({"type":"sfu_closed","channelIds":held_ids[sub]})).unwrap();
+        c[sub]
+            .as_mut()
+            .unwrap()
+            .signal(&json!({"type":"sfu_closed","channelIds":held_ids[sub]}))
+            .unwrap();
     }
-    if subs_first { close(&sessions[2], &own2); }
-    c[2] = None;  // the leaving game drops its association
+    if subs_first {
+        close(&sessions[2], &own2);
+    }
+    c[2] = None; // the leaving game drops its association
     let started = Instant::now();
     connect(&mut c, &mut sessions);
     let mut last = String::new();
@@ -890,17 +1462,32 @@ fn probe_publisher_leaves() {
         poll(&mut c, &mut got);
         if !subscribed && c[3].as_ref().unwrap().connected {
             let ch = allocate(&sessions[3], 4, None);
-            c[3].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+            c[3].as_mut()
+                .unwrap()
+                .signal(&json!({"type":"sfu_channels","channels":ch}))
+                .unwrap();
             for sub in 0..2 {
                 let ch = allocate(&sessions[sub], 4, Some(&sessions[3]));
-                new_ids[sub] = ch.iter().map(|x| x["channelId"].as_u64().unwrap()).collect();
-                c[sub].as_mut().unwrap().signal(&json!({"type":"sfu_channels","channels":ch})).unwrap();
+                new_ids[sub] = ch
+                    .iter()
+                    .map(|x| x["channelId"].as_u64().unwrap())
+                    .collect();
+                c[sub]
+                    .as_mut()
+                    .unwrap()
+                    .signal(&json!({"type":"sfu_channels","channels":ch}))
+                    .unwrap();
             }
             eprintln!("probe: {} ms: subscribed to the new session: ids {new_ids:?} (closed ones {held_ids:?})", started.elapsed().as_millis());
             subscribed = true;
-            for s in c.iter_mut().flatten() { s.signal(&json!({"type":"start","startAt":4242,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1},{"memberId":4,"slot":3}]})).unwrap(); s.released = true; }
+            for s in c.iter_mut().flatten() {
+                s.signal(&json!({"type":"start","startAt":4242,"players":[{"memberId":1,"slot":0},{"memberId":2,"slot":1},{"memberId":4,"slot":3}]})).unwrap();
+                s.released = true;
+            }
         }
-        if subscribed { let _ = c[3].as_mut().unwrap().send(&[6, 3, 7]); }
+        if subscribed {
+            let _ = c[3].as_mut().unwrap().send(&[6, 3, 7]);
+        }
         let state: Vec<String> = (0..2).map(|s| {
             let x = c[s].as_mut().unwrap();
             let held: Vec<u64> = held_ids[s].iter().copied().filter(|id| x.rtc.direct_api().channel_id_by_sctp_stream_id(*id as u16).is_some()).collect();
@@ -909,8 +1496,16 @@ fn probe_publisher_leaves() {
                 got[s].iter().filter(|f| f[0] == 6 && f[1] == 3).count())
         }).collect();
         let line = state.join("; ");
-        if line != last { eprintln!("probe: {} ms: {line}", started.elapsed().as_millis()); last = line; }
-        if got[0].iter().any(|f| f[0] == 6 && f[1] == 3) && got[1].iter().any(|f| f[0] == 6 && f[1] == 3) { eprintln!("probe: both got the new publisher's event"); return; }
+        if line != last {
+            eprintln!("probe: {} ms: {line}", started.elapsed().as_millis());
+            last = line;
+        }
+        if got[0].iter().any(|f| f[0] == 6 && f[1] == 3)
+            && got[1].iter().any(|f| f[0] == 6 && f[1] == 3)
+        {
+            eprintln!("probe: both got the new publisher's event");
+            return;
+        }
         std::thread::sleep(Duration::from_millis(5));
     }
     panic!("the new publisher's channels never worked");

@@ -24,7 +24,9 @@
 //! `write`: native_render's end and native_submit's start, :879-891).
 //!
 //! Referee: `rustgs.py test ... -- --test native_arenas`.
-use crate::abi::{DhdrCommand, DhdrVertex, DHDR_CMD_ALPHA_UPLOAD, DHDR_CMD_COPY, DHDR_CMD_DRAW, DHDR_CMD_IMPORT};
+use crate::abi::{
+    DhdrCommand, DhdrVertex, DHDR_CMD_ALPHA_UPLOAD, DHDR_CMD_COPY, DHDR_CMD_DRAW, DHDR_CMD_IMPORT,
+};
 use crate::device::Gpu;
 
 /// The uniform binding window (NATIVE_UNIFORM_WINDOW): a binding at the last offset still fits.
@@ -77,25 +79,39 @@ struct Arena {
 impl Arena {
     /// native_arena: at least `need` bytes (and `window` bytes beyond them in the buffer, for a
     /// binding at the last offset); true when the buffer is new.
-    fn grow(&mut self, gpu: Option<&Gpu>, need: u64, window: u64, usage: wgpu::BufferUsages,
-            label: &str) -> Result<bool, String> {
+    fn grow(
+        &mut self,
+        gpu: Option<&Gpu>,
+        need: u64,
+        window: u64,
+        usage: wgpu::BufferUsages,
+        label: &str,
+    ) -> Result<bool, String> {
         if self.buffer_size != 0 && need <= self.capacity {
             return Ok(false);
         }
-        let mut size = if self.capacity != 0 { self.capacity } else { 1 << 20 };
+        let mut size = if self.capacity != 0 {
+            self.capacity
+        } else {
+            1 << 20
+        };
         while size < need {
             size *= 2;
         }
-        let bytes = usize::try_from(size).map_err(|_| format!("gs native: {label}: {size} bytes"))?;
-        self.data.try_reserve_exact(bytes.saturating_sub(self.data.len()))
+        let bytes =
+            usize::try_from(size).map_err(|_| format!("gs native: {label}: {size} bytes"))?;
+        self.data
+            .try_reserve_exact(bytes.saturating_sub(self.data.len()))
             .map_err(|_| format!("gs native: out of memory ({label})"))?;
         self.data.resize(bytes, 0);
-        self.buffer = gpu.map(|g| g.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: size + window,
-            usage: usage | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
+        self.buffer = gpu.map(|g| {
+            g.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: size + window,
+                usage: usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
         self.buffer_size = size + window;
         self.capacity = size;
         Ok(true)
@@ -157,8 +173,12 @@ impl Arenas {
 
     /// Room for a picture's constants, uploads and reversed vertices. `gpu`: the device and the
     /// uniform bind group layout (`init::Objects`); None sizes only.
-    pub fn reserve(&mut self, gpu: Option<(&Gpu, &wgpu::BindGroupLayout)>, commands: &[DhdrCommand],
-                   vertex_count: u32) -> Result<(), String> {
+    pub fn reserve(
+        &mut self,
+        gpu: Option<(&Gpu, &wgpu::BindGroupLayout)>,
+        commands: &[DhdrCommand],
+        vertex_count: u32,
+    ) -> Result<(), String> {
         let device = gpu.map(|(g, _)| g);
         let mut uniforms: u64 = 2 * 256; // + the scanout's
         let mut uploads: u64 = 0;
@@ -182,47 +202,73 @@ impl Arenas {
                 _ => {}
             }
         }
-        if self.uniforms.grow(device, uniforms, UNIFORM_WINDOW, wgpu::BufferUsages::UNIFORM, "native constants")? {
+        if self.uniforms.grow(
+            device,
+            uniforms,
+            UNIFORM_WINDOW,
+            wgpu::BufferUsages::UNIFORM,
+            "native constants",
+        )? {
             self.uniform_group = match (gpu, &self.uniforms.buffer) {
-                (Some((g, layout)), Some(buffer)) => Some(g.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(UNIFORM_WINDOW),
-                        }),
-                    }],
-                })),
+                (Some((g, layout)), Some(buffer)) => {
+                    Some(g.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout,
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer,
+                                offset: 0,
+                                size: wgpu::BufferSize::new(UNIFORM_WINDOW),
+                            }),
+                        }],
+                    }))
+                }
                 _ => None,
             };
         }
         if uploads != 0 {
-            self.uploads.grow(device, uploads, 0, wgpu::BufferUsages::COPY_SRC, "native uploads")?;
+            self.uploads.grow(
+                device,
+                uploads,
+                0,
+                wgpu::BufferUsages::COPY_SRC,
+                "native uploads",
+            )?;
         }
         if reversed > self.reversed_capacity as u64 {
-            let n = u32::try_from(reversed).map_err(|_| format!("gs native: {reversed} reversed vertices"))?;
-            self.reversed.try_reserve_exact((n as usize).saturating_sub(self.reversed.len()))
+            let n = u32::try_from(reversed)
+                .map_err(|_| format!("gs native: {reversed} reversed vertices"))?;
+            self.reversed
+                .try_reserve_exact((n as usize).saturating_sub(self.reversed.len()))
                 .map_err(|_| "gs native: out of memory (reversed vertices)".to_string())?;
             self.reversed_capacity = n;
         }
         let vertices = (vertex_count as u64 + reversed) * VERTEX_BYTES;
         if self.vertex_capacity == 0 || vertices > self.vertex_capacity {
-            let mut size = if self.vertex_capacity != 0 { self.vertex_capacity } else { (1 << 18) * VERTEX_BYTES };
+            let mut size = if self.vertex_capacity != 0 {
+                self.vertex_capacity
+            } else {
+                (1 << 18) * VERTEX_BYTES
+            };
             while size < vertices {
                 size *= 2;
             }
             // Also storage for the mesh draws' object records (native.wgsl's mesh_records; not where
             // the device draws no meshes, the browser among them: init.rs's refuse_meshes).
-            let storage = if crate::native::init::meshes_refused() { wgpu::BufferUsages::empty() } else { wgpu::BufferUsages::STORAGE };
-            self.vertex_buffer = device.map(|g| g.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("native vertices"),
-                size,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | storage,
-                mapped_at_creation: false,
-            }));
+            let storage = if crate::native::init::meshes_refused() {
+                wgpu::BufferUsages::empty()
+            } else {
+                wgpu::BufferUsages::STORAGE
+            };
+            self.vertex_buffer = device.map(|g| {
+                g.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("native vertices"),
+                    size,
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST | storage,
+                    mapped_at_creation: false,
+                })
+            });
             self.mesh_group = None;
             self.vertex_capacity = size;
         }
@@ -236,14 +282,29 @@ impl Arenas {
     /// An indexed picture (`dhdr_native_picture_indexed`), after `reserve`: room for its
     /// `index_count` indices and the reversed triangles' indices after them (each draw's count, as
     /// `reserve` counts reversed vertices). The index buffer grows from 2^18 indices by doubling.
-    pub fn reserve_indices(&mut self, device: &Gpu, commands: &[DhdrCommand], index_count: u32) -> Result<(), String> {
-        let reversed: u64 = commands.iter()
-            .filter(|k| !matches!(k.kind, DHDR_CMD_ALPHA_UPLOAD | DHDR_CMD_IMPORT | DHDR_CMD_COPY))
+    pub fn reserve_indices(
+        &mut self,
+        device: &Gpu,
+        commands: &[DhdrCommand],
+        index_count: u32,
+    ) -> Result<(), String> {
+        let reversed: u64 = commands
+            .iter()
+            .filter(|k| {
+                !matches!(
+                    k.kind,
+                    DHDR_CMD_ALPHA_UPLOAD | DHDR_CMD_IMPORT | DHDR_CMD_COPY
+                )
+            })
             .map(|k| k.count as u64)
             .sum();
         let bytes = (index_count as u64 + reversed) * 4;
         if self.index_capacity == 0 || bytes > self.index_capacity {
-            let mut size = if self.index_capacity != 0 { self.index_capacity } else { (1 << 18) * 4 };
+            let mut size = if self.index_capacity != 0 {
+                self.index_capacity
+            } else {
+                (1 << 18) * 4
+            };
             while size < bytes {
                 size *= 2;
             }
@@ -255,9 +316,11 @@ impl Arenas {
             }));
             self.index_capacity = size;
         }
-        let n = usize::try_from(reversed).map_err(|_| format!("gs native: {reversed} reversed indices"))?;
+        let n = usize::try_from(reversed)
+            .map_err(|_| format!("gs native: {reversed} reversed indices"))?;
         self.reversed_indices.clear();
-        self.reversed_indices.try_reserve_exact(n)
+        self.reversed_indices
+            .try_reserve_exact(n)
             .map_err(|_| "gs native: out of memory (reversed indices)".to_string())?;
         self.index_base = index_count;
         Ok(())
@@ -282,12 +345,18 @@ impl Arenas {
     /// An indexed picture's indices, then its reversed ones at its index count, into the index
     /// buffer (with `write_vertices`, which writes its vertices).
     pub fn write_indices(&self, queue: &wgpu::Queue, indices: &[u32]) {
-        let Some(buffer) = &self.index_buffer else { return };
+        let Some(buffer) = &self.index_buffer else {
+            return;
+        };
         if !indices.is_empty() {
             queue.write_buffer(buffer, 0, as_bytes(indices));
         }
         if !self.reversed_indices.is_empty() {
-            queue.write_buffer(buffer, self.index_base as u64 * 4, as_bytes(&self.reversed_indices));
+            queue.write_buffer(
+                buffer,
+                self.index_base as u64 * 4,
+                as_bytes(&self.reversed_indices),
+            );
         }
     }
 
@@ -352,12 +421,18 @@ impl Arenas {
     /// The picture's vertices, then its reversed ones at `reversed_base`, into the vertex buffer
     /// (native_render's end).
     pub fn write_vertices(&self, queue: &wgpu::Queue, vertices: &[DhdrVertex]) {
-        let Some(buffer) = &self.vertex_buffer else { return };
+        let Some(buffer) = &self.vertex_buffer else {
+            return;
+        };
         if !vertices.is_empty() {
             queue.write_buffer(buffer, 0, as_bytes(vertices));
         }
         if !self.reversed.is_empty() {
-            queue.write_buffer(buffer, self.reversed_base as u64 * VERTEX_BYTES, as_bytes(&self.reversed));
+            queue.write_buffer(
+                buffer,
+                self.reversed_base as u64 * VERTEX_BYTES,
+                as_bytes(&self.reversed),
+            );
         }
     }
 
@@ -373,23 +448,37 @@ impl Arenas {
 
     /// Room for the picture's draw constants, one per DRAW command at most (`layout`: init.rs's
     /// draws layout); the arena grows from 1 MiB by doubling, its bind group made again with it.
-    pub fn reserve_draws(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout, commands: &[DhdrCommand])
-                         -> Result<(), String> {
-        let draws = commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count() as u64;
-        if self.draws.grow(Some(gpu), (draws + 1) * DRAW_STRIDE, DRAW_STRIDE, wgpu::BufferUsages::UNIFORM,
-                           "native draw constants")? {
-            self.draw_group = self.draws.buffer.as_ref().map(|buffer| gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("native draw constants"),
-                layout,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer,
-                        offset: 0,
-                        size: wgpu::BufferSize::new(DRAW_BYTES),
-                    }),
-                }],
-            }));
+    pub fn reserve_draws(
+        &mut self,
+        gpu: &Gpu,
+        layout: &wgpu::BindGroupLayout,
+        commands: &[DhdrCommand],
+    ) -> Result<(), String> {
+        let draws = commands
+            .iter()
+            .filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0)
+            .count() as u64;
+        if self.draws.grow(
+            Some(gpu),
+            (draws + 1) * DRAW_STRIDE,
+            DRAW_STRIDE,
+            wgpu::BufferUsages::UNIFORM,
+            "native draw constants",
+        )? {
+            self.draw_group = self.draws.buffer.as_ref().map(|buffer| {
+                gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("native draw constants"),
+                    layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer,
+                            offset: 0,
+                            size: wgpu::BufferSize::new(DRAW_BYTES),
+                        }),
+                    }],
+                })
+            });
         }
         self.draws.used = 0;
         Ok(())
@@ -435,20 +524,29 @@ impl Arenas {
     /// The mesh draws' group 2 (`layout`: init.rs's mesh layout): the whole vertex buffer, where
     /// native_core.inc's native_mesh_record puts the objects' records (finding 168).
     /// None (and Native VU off, finding 194) when the buffer is larger than one storage binding.
-    pub fn mesh_group(&mut self, gpu: &Gpu, layout: &wgpu::BindGroupLayout) -> Option<wgpu::BindGroup> {
+    pub fn mesh_group(
+        &mut self,
+        gpu: &Gpu,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Option<wgpu::BindGroup> {
         if self.mesh_group.is_none() {
             let buffer = self.vertex_buffer.as_ref()?;
             if !buffer.usage().contains(wgpu::BufferUsages::STORAGE) {
-                return None;   // made after the meshes were refused
+                return None; // made after the meshes were refused
             }
             if buffer.size() > gpu.device.limits().max_storage_buffer_binding_size {
-                crate::native::init::refuse_meshes(Some("the picture's vertices exceed one storage binding"));
+                crate::native::init::refuse_meshes(Some(
+                    "the picture's vertices exceed one storage binding",
+                ));
                 return None;
             }
             self.mesh_group = Some(gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("native mesh records"),
                 layout,
-                entries: &[wgpu::BindGroupEntry { binding: 0, resource: buffer.as_entire_binding() }],
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
             }));
         }
         self.mesh_group.clone()

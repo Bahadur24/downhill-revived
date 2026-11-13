@@ -54,7 +54,9 @@ unsafe fn slice<'a, T>(p: *const T, len: usize, export: &'static str) -> &'a [T]
         return &[];
     }
     if p.is_null() {
-        fatal(&format!("dhd_render: {export}: NULL data for {len} elements"));
+        fatal(&format!(
+            "dhd_render: {export}: NULL data for {len} elements"
+        ));
     }
     // SAFETY: the caller's contract.
     unsafe { std::slice::from_raw_parts(p, len) }
@@ -69,7 +71,9 @@ unsafe fn slice_mut<'a, T>(p: *mut T, len: usize, export: &'static str) -> &'a m
         return &mut [];
     }
     if p.is_null() {
-        fatal(&format!("dhd_render: {export}: NULL output for {len} elements"));
+        fatal(&format!(
+            "dhd_render: {export}: NULL output for {len} elements"
+        ));
     }
     // SAFETY: the caller's contract.
     unsafe { std::slice::from_raw_parts_mut(p, len) }
@@ -116,8 +120,16 @@ pub unsafe extern "C" fn dhdr_device_init(d: *const DhdrDeviceDesc) -> i32 {
             return 0;
         };
         if d.size as usize != std::mem::size_of::<DhdrDeviceDesc>() || d.abi != DHDR_ABI_VERSION {
-            log_err(E, &format!("descriptor size {} abi {}; this library is abi {} size {}", d.size, d.abi,
-                                DHDR_ABI_VERSION, std::mem::size_of::<DhdrDeviceDesc>()));
+            log_err(
+                E,
+                &format!(
+                    "descriptor size {} abi {}; this library is abi {} size {}",
+                    d.size,
+                    d.abi,
+                    DHDR_ABI_VERSION,
+                    std::mem::size_of::<DhdrDeviceDesc>()
+                ),
+            );
             crate::device::fail();
             return 0;
         }
@@ -134,8 +146,13 @@ pub unsafe extern "C" fn dhdr_device_init(d: *const DhdrDeviceDesc) -> i32 {
                 }
             }
         };
-        let o = crate::device::DeviceOptions { flags: d.flags, vendor_id: d.vendor_id, device_id: d.device_id,
-                                               log_level: d.log_level, dxc_path };
+        let o = crate::device::DeviceOptions {
+            flags: d.flags,
+            vendor_id: d.vendor_id,
+            device_id: d.device_id,
+            log_level: d.log_level,
+            dxc_path,
+        };
         crate::device::init(&o) as i32
     }
 }
@@ -183,9 +200,14 @@ unsafe fn exact<'a>(x: *const DhdrExact, export: &'static str) -> &'a Owned<Exac
 pub unsafe extern "C" fn dhdr_exact_create(raster_flags: u32) -> *mut DhdrExact {
     const E: &str = "dhdr_exact_create";
     let _g = Guard::enter(E);
-    let Some(gpu) = gpu_or_log(E) else { return std::ptr::null_mut() };
+    let Some(gpu) = gpu_or_log(E) else {
+        return std::ptr::null_mut();
+    };
     if raster_flags & !7 != 0 {
-        log_err(E, &format!("raster_flags {raster_flags:#x} has bits outside DHDR_RASTER_*"));
+        log_err(
+            E,
+            &format!("raster_flags {raster_flags:#x} has bits outside DHDR_RASTER_*"),
+        );
         return std::ptr::null_mut();
     }
     match Exact::create(gpu, raster_flags) {
@@ -209,7 +231,13 @@ pub unsafe extern "C" fn dhdr_exact_destroy(x: *mut DhdrExact) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_write(x: *mut DhdrExact, buffer: u32, offset: u32, data: *const c_void, bytes: u32) {
+pub unsafe extern "C" fn dhdr_exact_write(
+    x: *mut DhdrExact,
+    buffer: u32,
+    offset: u32,
+    data: *const c_void,
+    bytes: u32,
+) {
     const E: &str = "dhdr_exact_write";
     let _g = Guard::enter(E);
     // SAFETY: the header's contract: data holds bytes bytes.
@@ -219,8 +247,14 @@ pub unsafe extern "C" fn dhdr_exact_write(x: *mut DhdrExact, buffer: u32, offset
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_copy(x: *mut DhdrExact, from: u32, from_offset: u32, to: u32, to_offset: u32,
-                                         bytes: u32) {
+pub unsafe extern "C" fn dhdr_exact_copy(
+    x: *mut DhdrExact,
+    from: u32,
+    from_offset: u32,
+    to: u32,
+    to_offset: u32,
+    bytes: u32,
+) {
     const E: &str = "dhdr_exact_copy";
     let _g = Guard::enter(E);
     // SAFETY: as exact().
@@ -228,7 +262,12 @@ pub unsafe extern "C" fn dhdr_exact_copy(x: *mut DhdrExact, from: u32, from_offs
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_batch(x: *mut DhdrExact, dynamic_offset: u32, groups_x: u32, groups_y: u32) {
+pub unsafe extern "C" fn dhdr_exact_batch(
+    x: *mut DhdrExact,
+    dynamic_offset: u32,
+    groups_x: u32,
+    groups_y: u32,
+) {
     const E: &str = "dhdr_exact_batch";
     let _g = Guard::enter(E);
     // SAFETY: as exact().
@@ -236,7 +275,12 @@ pub unsafe extern "C" fn dhdr_exact_batch(x: *mut DhdrExact, dynamic_offset: u32
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_record(x: *mut DhdrExact, pipeline: u32, x_word: u32, y_word: u32) {
+pub unsafe extern "C" fn dhdr_exact_record(
+    x: *mut DhdrExact,
+    pipeline: u32,
+    x_word: u32,
+    y_word: u32,
+) {
     const E: &str = "dhdr_exact_record";
     let _g = Guard::enter(E);
     // SAFETY: as exact().
@@ -252,11 +296,17 @@ pub unsafe extern "C" fn dhdr_exact_submit(x: *mut DhdrExact) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_read_begin(x: *mut DhdrExact, buffer: u32, want: *const u32) -> i32 {
+pub unsafe extern "C" fn dhdr_exact_read_begin(
+    x: *mut DhdrExact,
+    buffer: u32,
+    want: *const u32,
+) -> i32 {
     const E: &str = "dhdr_exact_read_begin";
     let _g = Guard::enter(E);
     // SAFETY: want is uint32_t[16] (the header).
-    let want: &[u32; 16] = unsafe { slice(want, 16, E) }.try_into().unwrap_or_else(|_| fatal("want"));
+    let want: &[u32; 16] = unsafe { slice(want, 16, E) }
+        .try_into()
+        .unwrap_or_else(|_| fatal("want"));
     // SAFETY: as exact().
     unsafe { exact(x, E) }.begin(E, |e| {
         let r = e.read_begin(buffer, want);
@@ -265,18 +315,31 @@ pub unsafe extern "C" fn dhdr_exact_read_begin(x: *mut DhdrExact, buffer: u32, w
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_read_finish(x: *mut DhdrExact, buffer: u32, want: *const u32, image: *mut c_void) -> i32 {
+pub unsafe extern "C" fn dhdr_exact_read_finish(
+    x: *mut DhdrExact,
+    buffer: u32,
+    want: *const u32,
+    image: *mut c_void,
+) -> i32 {
     const E: &str = "dhdr_exact_read_finish";
     let _g = Guard::enter(E);
     // SAFETY: want is uint32_t[16]; image is the 4 MiB page image (512 pages of 8192 bytes).
-    let want: &[u32; 16] = unsafe { slice(want, 16, E) }.try_into().unwrap_or_else(|_| fatal("want"));
+    let want: &[u32; 16] = unsafe { slice(want, 16, E) }
+        .try_into()
+        .unwrap_or_else(|_| fatal("want"));
     let image = unsafe { slice_mut(image as *mut u8, (DHDR_PAGES * DHDR_PAGE_BYTES) as usize, E) };
     // SAFETY: as exact().
-    unsafe { exact(x, E) }.finish(E, "dhdr_exact_read_begin", |e| e.read_finish(buffer, want, image))
+    unsafe { exact(x, E) }.finish(E, "dhdr_exact_read_begin", |e| {
+        e.read_finish(buffer, want, image)
+    })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_exact_capture_begin(x: *mut DhdrExact, w: *mut u32, h: *mut u32) -> i32 {
+pub unsafe extern "C" fn dhdr_exact_capture_begin(
+    x: *mut DhdrExact,
+    w: *mut u32,
+    h: *mut u32,
+) -> i32 {
     const E: &str = "dhdr_exact_capture_begin";
     let _g = Guard::enter(E);
     // SAFETY: w and h are outputs (the header).
@@ -335,18 +398,30 @@ unsafe fn surface<'a>(s: *const DhdrSurface, export: &'static str) -> &'a Owned<
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_surface_create(w: *const DhdrWindow, present_flags: u32) -> *mut DhdrSurface {
+pub unsafe extern "C" fn dhdr_surface_create(
+    w: *const DhdrWindow,
+    present_flags: u32,
+) -> *mut DhdrSurface {
     const E: &str = "dhdr_surface_create";
     let _g = Guard::enter(E);
-    let Some(gpu) = gpu_or_log(E) else { return std::ptr::null_mut() };
+    let Some(gpu) = gpu_or_log(E) else {
+        return std::ptr::null_mut();
+    };
     // SAFETY: C passes NULL or a DhdrWindow.
     let Some(w) = (unsafe { w.as_ref() }) else {
         log_err(E, "NULL window");
         return std::ptr::null_mut();
     };
     if !Surface::supports(w.kind) {
-        log_err(E, &format!("window kind {} is not supported here (this build: {:?}; the browser's \
-                             canvas surface comes from dhdr_web_surface)", w.kind, Surface::KINDS));
+        log_err(
+            E,
+            &format!(
+                "window kind {} is not supported here (this build: {:?}; the browser's \
+                             canvas surface comes from dhdr_web_surface)",
+                w.kind,
+                Surface::KINDS
+            ),
+        );
         return std::ptr::null_mut();
     }
     match Surface::create(gpu, w, present_flags) {
@@ -377,8 +452,15 @@ pub unsafe extern "C" fn dhdr_surface_usage(s: *const DhdrSurface) -> u32 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_present_exact(s: *mut DhdrSurface, x: *mut DhdrExact, pixels: *const u32, w: u32,
-                                            h: u32, window_w: u32, window_h: u32) -> i32 {
+pub unsafe extern "C" fn dhdr_present_exact(
+    s: *mut DhdrSurface,
+    x: *mut DhdrExact,
+    pixels: *const u32,
+    w: u32,
+    h: u32,
+    window_w: u32,
+    window_h: u32,
+) -> i32 {
     const E: &str = "dhdr_present_exact";
     let _g = Guard::enter(E);
     let pixels = if pixels.is_null() {
@@ -397,26 +479,48 @@ pub unsafe extern "C" fn dhdr_present_exact(s: *mut DhdrSurface, x: *mut DhdrExa
             s.present_exact(None, pixels, w, h, window_w, window_h)
         } else {
             // SAFETY: as exact().
-            unsafe { exact(x, E) }.with(E, |e| s.present_exact(Some(e), pixels, w, h, window_w, window_h))
+            unsafe { exact(x, E) }.with(E, |e| {
+                s.present_exact(Some(e), pixels, w, h, window_w, window_h)
+            })
         }
     })
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_surface_counter(s: *mut DhdrSurface, enabled: i32, server_ms: i32, race_ms: i32, riders_ms: i32, seconds: f64) {
+pub unsafe extern "C" fn dhdr_surface_counter(
+    s: *mut DhdrSurface,
+    enabled: i32,
+    server_ms: i32,
+    race_ms: i32,
+    riders_ms: i32,
+    seconds: f64,
+) {
     const E: &str = "dhdr_surface_counter";
     let _g = Guard::enter(E);
     // SAFETY: the caller owns a live surface, as for surface_present.
-    unsafe { surface(s, E) }.with(E, |s| s.counter.update(enabled != 0, [server_ms, race_ms, riders_ms], seconds));
+    unsafe { surface(s, E) }.with(E, |s| {
+        s.counter
+            .update(enabled != 0, [server_ms, race_ms, riders_ms], seconds)
+    });
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_surface_touch(s: *mut DhdrSurface, items: *const f32, count: u32, width_mm: f32, height_mm: f32) {
+pub unsafe extern "C" fn dhdr_surface_touch(
+    s: *mut DhdrSurface,
+    items: *const f32,
+    count: u32,
+    width_mm: f32,
+    height_mm: f32,
+) {
     const E: &str = "dhdr_surface_touch";
     let _g = Guard::enter(E);
     let floats = count as usize * crate::present::touch::ITEM_FLOATS;
     // SAFETY: the caller passes `count` shapes of ITEM_FLOATS floats each (or none).
-    let items: &[f32] = if items.is_null() || count == 0 { &[] } else { unsafe { std::slice::from_raw_parts(items, floats) } };
+    let items: &[f32] = if items.is_null() || count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(items, floats) }
+    };
     // SAFETY: as surface_present.
     unsafe { surface(s, E) }.with(E, |s| s.touch.set(items, width_mm, height_mm));
 }
@@ -467,7 +571,9 @@ unsafe fn native<'a>(n: *const DhdrNative, export: &'static str) -> &'a Owned<Na
 pub unsafe extern "C" fn dhdr_native_create(flags: u32) -> *mut DhdrNative {
     const E: &str = "dhdr_native_create";
     let _g = Guard::enter(E);
-    let Some(gpu) = gpu_or_log(E) else { return std::ptr::null_mut() };
+    let Some(gpu) = gpu_or_log(E) else {
+        return std::ptr::null_mut();
+    };
     match Native::create(gpu, flags) {
         Ok(n) => into_handle(n),
         Err(e) => {
@@ -491,7 +597,9 @@ pub unsafe extern "C" fn dhdr_native_destroy(n: *mut DhdrNative) {
 pub unsafe extern "C" fn dhdr_texture_create(rgba: *const u32, w: u32, h: u32) -> *mut DhdrTexture {
     const E: &str = "dhdr_texture_create";
     let _g = Guard::enter(E);
-    let Some(gpu) = gpu_or_log(E) else { return std::ptr::null_mut() };
+    let Some(gpu) = gpu_or_log(E) else {
+        return std::ptr::null_mut();
+    };
     if w == 0 || h == 0 {
         log_err(E, &format!("size {w} x {h}"));
         return std::ptr::null_mut();
@@ -508,10 +616,17 @@ pub unsafe extern "C" fn dhdr_texture_create(rgba: *const u32, w: u32, h: u32) -
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_replace_create(rgba_mips: *const u8, w: u32, h: u32, levels: u32) -> *mut DhdrTexture {
+pub unsafe extern "C" fn dhdr_replace_create(
+    rgba_mips: *const u8,
+    w: u32,
+    h: u32,
+    levels: u32,
+) -> *mut DhdrTexture {
     const E: &str = "dhdr_replace_create";
     let _g = Guard::enter(E);
-    let Some(gpu) = gpu_or_log(E) else { return std::ptr::null_mut() };
+    let Some(gpu) = gpu_or_log(E) else {
+        return std::ptr::null_mut();
+    };
     let Some(bytes) = crate::native::mip_bytes(w, h, levels) else {
         log_err(E, &format!("size {w} x {h} with {levels} levels"));
         return std::ptr::null_mut();
@@ -542,14 +657,24 @@ pub unsafe extern "C" fn dhdr_texture_release(t: *mut DhdrTexture) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_surface(n: *mut DhdrNative, index: u32, scale: u32, w: u32, h: u32, depth: u32,
-                                             size_out: *mut u32) -> i32 {
+pub unsafe extern "C" fn dhdr_native_surface(
+    n: *mut DhdrNative,
+    index: u32,
+    scale: u32,
+    w: u32,
+    h: u32,
+    depth: u32,
+    size_out: *mut u32,
+) -> i32 {
     const E: &str = "dhdr_native_surface";
     let _g = Guard::enter(E);
     // SAFETY: size_out is uint32_t[2] (the header).
     let size_out = unsafe { slice_mut(size_out, 2, E) };
     if index >= DHDR_NATIVE_SURFACES {
-        log_err(E, &format!("surface index {index} (fewer than {DHDR_NATIVE_SURFACES})"));
+        log_err(
+            E,
+            &format!("surface index {index} (fewer than {DHDR_NATIVE_SURFACES})"),
+        );
         return 0;
     }
     // SAFETY: as native().
@@ -580,8 +705,15 @@ unsafe fn picture<'a>(p: &'a DhdrPicture, export: &'static str) -> Picture<'a> {
             display_surface: p.display_surface,
             display: p.display,
             movie: (p.movie_on != 0).then(|| {
-                (p.movie_width, p.movie_height,
-                 slice(p.movie, p.movie_width as usize * p.movie_height as usize, export))
+                (
+                    p.movie_width,
+                    p.movie_height,
+                    slice(
+                        p.movie,
+                        p.movie_width as usize * p.movie_height as usize,
+                        export,
+                    ),
+                )
             }),
             scale: p.scale,
         }
@@ -589,13 +721,24 @@ unsafe fn picture<'a>(p: &'a DhdrPicture, export: &'static str) -> Picture<'a> {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_picture(n: *mut DhdrNative, p: *const DhdrPicture, out: *mut DhdrPictureResult) -> i32 {
+pub unsafe extern "C" fn dhdr_native_picture(
+    n: *mut DhdrNative,
+    p: *const DhdrPicture,
+    out: *mut DhdrPictureResult,
+) -> i32 {
     const E: &str = "dhdr_native_picture";
     let _g = Guard::enter(E);
     // SAFETY: p and out are a picture and an output (the header).
     let (p, out) = unsafe { (must(p as *mut DhdrPicture, E), must(out, E)) };
     if p.size as usize != std::mem::size_of::<DhdrPicture>() {
-        log_err(E, &format!("DhdrPicture.size {} (this library's is {})", p.size, std::mem::size_of::<DhdrPicture>()));
+        log_err(
+            E,
+            &format!(
+                "DhdrPicture.size {} (this library's is {})",
+                p.size,
+                std::mem::size_of::<DhdrPicture>()
+            ),
+        );
         return 0;
     }
     // SAFETY: native_snapshot.inc fills every array with its count, alive for the call.
@@ -614,7 +757,11 @@ pub unsafe extern "C" fn dhdr_native_picture(n: *mut DhdrNative, p: *const DhdrP
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_present(n: *mut DhdrNative, s: *mut DhdrSurface, r: *const DhdrPresentRect) -> i32 {
+pub unsafe extern "C" fn dhdr_native_present(
+    n: *mut DhdrNative,
+    s: *mut DhdrSurface,
+    r: *const DhdrPresentRect,
+) -> i32 {
     const E: &str = "dhdr_native_present";
     let _g = Guard::enter(E);
     // SAFETY: r is a DhdrPresentRect (the header).
@@ -624,7 +771,11 @@ pub unsafe extern "C" fn dhdr_native_present(n: *mut DhdrNative, s: *mut DhdrSur
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_read_begin(n: *mut DhdrNative, w: *mut u32, h: *mut u32) -> i32 {
+pub unsafe extern "C" fn dhdr_native_read_begin(
+    n: *mut DhdrNative,
+    w: *mut u32,
+    h: *mut u32,
+) -> i32 {
     const E: &str = "dhdr_native_read_begin";
     let _g = Guard::enter(E);
     // SAFETY: w and h are outputs (the header).
@@ -656,7 +807,12 @@ pub unsafe extern "C" fn dhdr_native_read_finish(n: *mut DhdrNative, pixels: *mu
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_zread_start(n: *mut DhdrNative, index: u32, rect: *const u32, tag: u64) -> i32 {
+pub unsafe extern "C" fn dhdr_native_zread_start(
+    n: *mut DhdrNative,
+    index: u32,
+    rect: *const u32,
+    tag: u64,
+) -> i32 {
     const E: &str = "dhdr_native_zread_start";
     let _g = Guard::enter(E);
     // SAFETY: rect is uint32_t[4] (the header).
@@ -667,12 +823,23 @@ pub unsafe extern "C" fn dhdr_native_zread_start(n: *mut DhdrNative, index: u32,
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_zread_take(n: *mut DhdrNative, out: *mut u32, cap: u32, rect_out: *mut u32,
-                                                tag_out: *mut u64) -> i32 {
+pub unsafe extern "C" fn dhdr_native_zread_take(
+    n: *mut DhdrNative,
+    out: *mut u32,
+    cap: u32,
+    rect_out: *mut u32,
+    tag_out: *mut u64,
+) -> i32 {
     const E: &str = "dhdr_native_zread_take";
     let _g = Guard::enter(E);
     // SAFETY: out holds cap words, rect_out 4, tag_out one (the header).
-    let (out, rect_out, tag_out) = unsafe { (slice_mut(out, cap as usize, E), slice_mut(rect_out, 4, E), must(tag_out, E)) };
+    let (out, rect_out, tag_out) = unsafe {
+        (
+            slice_mut(out, cap as usize, E),
+            slice_mut(rect_out, 4, E),
+            must(tag_out, E),
+        )
+    };
     let mut rect = [0u32; 4];
     // SAFETY: as native().
     let taken = unsafe { native(n, E) }.with(E, |n| n.zread_take(out, &mut rect, tag_out));
@@ -699,7 +866,12 @@ const _: dhdr_png_decode_fn = dhdr_png_decode;
 
 #[cfg(feature = "native")]
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_png_size(data: *const u8, size: usize, w: *mut u32, h: *mut u32) -> i32 {
+pub unsafe extern "C" fn dhdr_png_size(
+    data: *const u8,
+    size: usize,
+    w: *mut u32,
+    h: *mut u32,
+) -> i32 {
     const E: &str = "dhdr_png_size";
     let _g = Guard::enter(E);
     // SAFETY: size bytes at data; w and h are outputs (the header).
@@ -718,10 +890,20 @@ pub unsafe extern "C" fn dhdr_png_size(data: *const u8, size: usize, w: *mut u32
 
 #[cfg(feature = "native")]
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_png_decode(data: *const u8, size: usize, rgba: *mut u8, w: u32, h: u32, opaque: u32) -> i32 {
+pub unsafe extern "C" fn dhdr_png_decode(
+    data: *const u8,
+    size: usize,
+    rgba: *mut u8,
+    w: u32,
+    h: u32,
+    opaque: u32,
+) -> i32 {
     const E: &str = "dhdr_png_decode";
     let _g = Guard::enter(E);
-    let Some(bytes) = (w as usize).checked_mul(h as usize).and_then(|p| p.checked_mul(4)) else {
+    let Some(bytes) = (w as usize)
+        .checked_mul(h as usize)
+        .and_then(|p| p.checked_mul(4))
+    else {
         log_err(E, &format!("size {w} x {h}"));
         return 0;
     };
@@ -757,13 +939,20 @@ const _: dhdr_test_presented_fn = dhdr_test_presented;
 
 #[cfg(feature = "test-hooks")]
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_test_depth_probe(cases: *const c_void, count: u32, results: *mut u32) -> i32 {
+pub unsafe extern "C" fn dhdr_test_depth_probe(
+    cases: *const c_void,
+    count: u32,
+    results: *mut u32,
+) -> i32 {
     const E: &str = "dhdr_test_depth_probe";
     let _g = Guard::enter(E);
     let Some(gpu) = gpu_or_log(E) else { return 0 };
     // SAFETY: count cases of 80 bytes in, 8 bytes out each (the header).
     let (cases, results) = unsafe {
-        (slice(cases as *const u8, count as usize * 80, E), slice_mut(results, count as usize * 2, E))
+        (
+            slice(cases as *const u8, count as usize * 80, E),
+            slice_mut(results, count as usize * 2, E),
+        )
     };
     match crate::test_hooks::depth_probe::run(gpu, cases, results) {
         Ok(()) => 1,

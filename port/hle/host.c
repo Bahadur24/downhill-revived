@@ -1186,7 +1186,12 @@ int host_setting_save(const char *key, const char *value)
     settings_path(path, sizeof path);
     return dhd_settings_save(path, key, value);
 }
-
+int host_setting_read(const char *key, char *value, size_t size)
+{
+    char path[HOST_PATH_MAX];
+    settings_path(path, sizeof path);
+    return dhd_settings_read(path, key, value, size);
+}
 /* Read afresh after each game-data load; these values never become DHD_* overrides. */
 int host_game_options_read(char *value, size_t size)
 {
@@ -1473,8 +1478,16 @@ void host_service_controls_map(int player, uint32_t raw, uint32_t out)
     gamepad_apply(pad_layout(player), (const GamepadRaw *)GUEST(raw), stick_dead_zone_of(getenv("DHD_STICK_DEAD_ZONE")), pad);
 }
 
-void host_service_host_settings_load(void) { host_settings_load(); }
+int host_service_host_settings_load(void)
+{
+    host_settings_load();
+    return 0;
+}
 int host_service_host_setting_save(uint32_t a0, uint32_t a1) { return host_setting_save((const char *)GUEST(a0), (const char *)GUEST(a1)); }
+int host_service_host_setting_read(uint32_t a0, uint32_t a1, uint32_t a2)
+{
+    return host_setting_read((const char *)GUEST(a0), (char *)GUEST(a1), a2);
+}
 int host_service_host_setting_locked(uint32_t a0) { return host_setting_locked((const char *)GUEST(a0)); }
 void host_service_host_pad_device(int a0, uint32_t a1) { host_pad_device(a0, (HostPad *)GUEST(a1)); }
 void host_service_host_pad_vibrate(int a0, int a1, int a2) { host_pad_vibrate(a0, a1, a2); }

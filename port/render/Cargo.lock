@@ -486,10 +486,12 @@ version = "1.0.0"
 dependencies = [
  "dhd_star",
  "httparse",
+ "libc",
  "ring",
  "rustls",
  "serde_json",
  "str0m",
+ "subtle",
  "tungstenite",
  "webpki-roots",
 ]

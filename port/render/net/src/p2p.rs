@@ -48,7 +48,17 @@ impl P2p {
         if !direct {
             eprintln!("net: P2P: DHD_NET_P2P_UDP=0, no direct links from this game (test switch): it races over the SFU");
         }
-        Self { star: Star::new(direct), peers: HashMap::new(), held: HashMap::new(), epoch: 0, wake, local: None, hub: None, on_sfu: vec![], started: Instant::now() }
+        Self {
+            star: Star::new(direct),
+            peers: HashMap::new(),
+            held: HashMap::new(),
+            epoch: 0,
+            wake,
+            local: None,
+            hub: None,
+            on_sfu: vec![],
+            started: Instant::now(),
+        }
     }
 
     /// The router's clock: milliseconds since the room began here.
@@ -72,16 +82,23 @@ impl P2p {
             self.hub = hub;
             self.on_sfu.clear();
             match hub {
-                Some(id) if self.star.is_hub() => eprintln!("net: P2P: this game is the room's hub (member {id})"),
+                Some(id) if self.star.is_hub() => {
+                    eprintln!("net: P2P: this game is the room's hub (member {id})")
+                }
                 Some(id) => eprintln!("net: P2P: member {id} is the room's hub"),
                 None => {}
             }
         }
         let sfu: Vec<u64> = m["members"].as_array().map_or(vec![], |a| {
-            a.iter().filter(|x| x["link"] == "sfu").filter_map(|x| x["id"].as_u64()).collect()
+            a.iter()
+                .filter(|x| x["link"] == "sfu")
+                .filter_map(|x| x["id"].as_u64())
+                .collect()
         });
         for id in sfu.iter().filter(|id| !self.on_sfu.contains(id)) {
-            eprintln!("net: P2P: member {id} races over the room's SFU (no direct link to the hub)");
+            eprintln!(
+                "net: P2P: member {id} races over the room's SFU (no direct link to the hub)"
+            );
         }
         self.on_sfu = sfu;
     }
@@ -181,7 +198,10 @@ impl P2p {
 
     fn connect(&mut self, c: &WsConn, member: u64, offerer: bool) {
         if self.local.is_none() {
-            let room = lock(&c.live).as_ref().and_then(|l| l.tcp.local_addr().ok()).map(|a| a.ip());
+            let room = lock(&c.live)
+                .as_ref()
+                .and_then(|l| l.tcp.local_addr().ok())
+                .map(|a| a.ip());
             self.local = peer::reachable_address(room);
         }
         let now = self.now();
@@ -192,7 +212,14 @@ impl P2p {
         match made {
             Ok(peer) => {
                 // The hub's offer goes out with the peer's first poll.
-                self.peers.insert(member, Link { peer, up: false, logged_path: false });
+                self.peers.insert(
+                    member,
+                    Link {
+                        peer,
+                        up: false,
+                        logged_path: false,
+                    },
+                );
                 let epoch = self.star.epoch();
                 for signal in self.held.remove(&member).unwrap_or_default() {
                     self.signal(member, epoch, &signal);
@@ -238,7 +265,12 @@ mod tests {
         }
     }
 
-    unsafe extern "C" fn on_close(_: *mut c_void, _: i32, _: *const c_char, _: i32) -> *const c_char {
+    unsafe extern "C" fn on_close(
+        _: *mut c_void,
+        _: i32,
+        _: *const c_char,
+        _: i32,
+    ) -> *const c_char {
         std::ptr::null()
     }
 
@@ -261,7 +293,10 @@ mod tests {
             let url = CString::new(url).unwrap();
             let conn = unsafe { ws_start(url.as_ptr(), &h) };
             assert!(!conn.is_null());
-            Self { conn: Some(conn), inbox }
+            Self {
+                conn: Some(conn),
+                inbox,
+            }
         }
         fn send(&self, m: Value) {
             let text = m.to_string();
@@ -271,11 +306,25 @@ mod tests {
             unsafe { ws_send(self.conn.unwrap(), 1, bytes.as_ptr().cast(), bytes.len()) };
         }
         fn last(&self, kind: &str) -> Option<Value> {
-            self.inbox.lock().unwrap().messages.iter().rev().find(|m| m["type"] == kind).cloned()
+            self.inbox
+                .lock()
+                .unwrap()
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m["type"] == kind)
+                .cloned()
         }
         /// The slots whose frames arrived since `since` frames.
         fn senders(&self, since: usize) -> std::collections::HashSet<u8> {
-            self.inbox.lock().unwrap().frames.iter().skip(since).map(|f| f[1]).collect()
+            self.inbox
+                .lock()
+                .unwrap()
+                .frames
+                .iter()
+                .skip(since)
+                .map(|f| f[1])
+                .collect()
         }
         fn frames(&self) -> usize {
             self.inbox.lock().unwrap().frames.len()
@@ -313,7 +362,10 @@ mod tests {
     }
 
     fn epoch_ms() -> f64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as f64
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as f64
     }
 
     /// A race frame as the game sends it: an event, or a minimal state bundle (version 6).
@@ -327,7 +379,8 @@ mod tests {
 
     /// `n` games in one P2P room, all ready, racing: each has heard every other racer's frames.
     fn racing(n: usize) -> Vec<Client> {
-        let base = std::env::var("DHD_NET_SERVER").expect("local_server.py supplies DHD_NET_SERVER");
+        let base =
+            std::env::var("DHD_NET_SERVER").expect("local_server.py supplies DHD_NET_SERVER");
         let host = Client::new(&format!("{base}/v1/rooms/new?transport=p2p"));
         wait("the welcome", || host.last("welcome").is_some());
         let welcome = host.last("welcome").unwrap();
@@ -339,12 +392,17 @@ mod tests {
             clients.push(Client::new(&format!("{base}/v1/rooms/{code}")));
         }
         wait("every member in every room", || {
-            clients.iter().all(|c| c.last("room").is_some_and(|m| m["members"].as_array().is_some_and(|a| a.len() == n)))
+            clients.iter().all(|c| {
+                c.last("room")
+                    .is_some_and(|m| m["members"].as_array().is_some_and(|a| a.len() == n))
+            })
         });
         for c in &clients {
             c.send(json!({"type": "ready", "ready": true}));
         }
-        wait("the start", || clients.iter().all(|c| c.last("start").is_some()));
+        wait("the start", || {
+            clients.iter().all(|c| c.last("start").is_some())
+        });
         hear_each_other(&clients, n);
         clients
     }
@@ -357,7 +415,10 @@ mod tests {
                 c.frame(&race_frame(false));
                 c.frame(&race_frame(true));
             }
-            clients.iter().zip(&marks).all(|(c, m)| c.senders(*m).len() == racers - 1)
+            clients
+                .iter()
+                .zip(&marks)
+                .all(|(c, m)| c.senders(*m).len() == racers - 1)
         });
     }
 
@@ -365,8 +426,12 @@ mod tests {
         for (i, c) in clients.iter().enumerate() {
             c.send(json!({"type": "finish", "ticks": 100 + i, "place": i + 1}));
         }
-        wait("the results", || clients.iter().all(|c| c.last("ended").is_some() &&
-            c.last("room").is_some_and(|r| !r["lastRace"].is_null())));
+        wait("the results", || {
+            clients.iter().all(|c| {
+                c.last("ended").is_some()
+                    && c.last("room").is_some_and(|r| !r["lastRace"].is_null())
+            })
+        });
     }
 
     fn room_race(n: usize) {
@@ -382,8 +447,8 @@ mod tests {
         let mut p = super::P2p::new(std::sync::Arc::new(|| {}));
         p.room(&json!({"type": "welcome", "memberId": 2}));
         p.room(&json!({"type": "p2p", "hub": 1, "epoch": 1, "members": [{"id": 1}, {"id": 2}], "race": null}));
-        p.signal(1, 1, &json!({"type": "offer", "sdp": "v=0"}));  // before its peer is made: held
-        p.signal(1, 0, &json!({"type": "candidate", "candidate": "old"}));  // an earlier hub's: dropped
+        p.signal(1, 1, &json!({"type": "offer", "sdp": "v=0"})); // before its peer is made: held
+        p.signal(1, 0, &json!({"type": "candidate", "candidate": "old"})); // an earlier hub's: dropped
         assert_eq!(p.held[&1].len(), 1);
         p.room(&json!({"type": "p2p", "hub": 3, "epoch": 2, "members": [{"id": 1}, {"id": 2}, {"id": 3}], "race": null}));
         assert!(p.held.is_empty());
@@ -411,7 +476,10 @@ mod tests {
         let mut clients = racing(3);
         clients[0].stop();
         let rest = &clients[1..];
-        wait("the hub's departure", || rest.iter().all(|c| c.last("left").is_some_and(|l| l["slot"] == 0)));
+        wait("the hub's departure", || {
+            rest.iter()
+                .all(|c| c.last("left").is_some_and(|l| l["slot"] == 0))
+        });
         hear_each_other(rest, 2);
         finish(rest);
         eprintln!("P2P ROOM MATCH: the hub left mid-race; the two others raced on over the next hub and got the results");

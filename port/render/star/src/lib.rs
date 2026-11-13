@@ -100,7 +100,17 @@ pub struct Star {
 
 impl Star {
     pub fn new(direct: bool) -> Self {
-        Self { me: None, hub: None, epoch: 0, members: vec![], race: None, peers: HashMap::new(), direct, reported_down: vec![], out: vec![] }
+        Self {
+            me: None,
+            hub: None,
+            epoch: 0,
+            members: vec![],
+            race: None,
+            peers: HashMap::new(),
+            direct,
+            reported_down: vec![],
+            out: vec![],
+        }
     }
 
     pub fn take(&mut self) -> Vec<Action> {
@@ -140,47 +150,78 @@ impl Star {
         self.hub = hub;
         let before = std::mem::take(&mut self.members);
         self.members = m["members"].as_array().map_or(vec![], |a| {
-            a.iter().filter_map(|x| {
-                let link = match x["link"].as_str() {
-                    Some("star") => Some(Link::Star),
-                    Some("sfu") => Some(Link::Sfu),
-                    _ => None,
-                };
-                Some((x["id"].as_u64()?, link))
-            }).collect()
+            a.iter()
+                .filter_map(|x| {
+                    let link = match x["link"].as_str() {
+                        Some("star") => Some(Link::Star),
+                        Some("sfu") => Some(Link::Sfu),
+                        _ => None,
+                    };
+                    Some((x["id"].as_u64()?, link))
+                })
+                .collect()
         });
         // A member back from the SFU to a try (the room retries between races) is reported again.
-        let retried: Vec<u64> = self.members.iter()
-            .filter(|(id, link)| link.is_none() && before.iter().any(|(b, l)| b == id && *l == Some(Link::Sfu)))
-            .map(|(id, _)| *id).collect();
+        let retried: Vec<u64> = self
+            .members
+            .iter()
+            .filter(|(id, link)| {
+                link.is_none() && before.iter().any(|(b, l)| b == id && *l == Some(Link::Sfu))
+            })
+            .map(|(id, _)| *id)
+            .collect();
         if let (Some(me), Some(hub)) = (self.me, self.hub) {
-            self.reported_down.retain(|other| !retried.contains(if me == hub { other } else { &me }));
+            self.reported_down
+                .retain(|other| !retried.contains(if me == hub { other } else { &me }));
         }
         let race = &m["race"];
         self.race = race["startAt"].as_u64().map(|marker| Race {
             marker,
-            slots: race["slots"].as_array().map_or(vec![], |a| a.iter().filter_map(Value::as_u64).take(SLOTS).collect()),
-            left: race["left"].as_array().map_or(vec![], |a| a.iter().filter_map(Value::as_u64).map(|s| s as u8).collect()),
+            slots: race["slots"].as_array().map_or(vec![], |a| {
+                a.iter().filter_map(Value::as_u64).take(SLOTS).collect()
+            }),
+            left: race["left"].as_array().map_or(vec![], |a| {
+                a.iter()
+                    .filter_map(Value::as_u64)
+                    .map(|s| s as u8)
+                    .collect()
+            }),
         });
         self.reconcile();
     }
 
     fn link_of(&self, id: u64) -> Option<Link> {
-        self.members.iter().find(|(m, _)| *m == id).and_then(|(_, l)| *l)
+        self.members
+            .iter()
+            .find(|(m, _)| *m == id)
+            .and_then(|(_, l)| *l)
     }
 
     /// The peer connections this game should hold: the hub one to every member not on the SFU, a
     /// member one to the hub unless it is on the SFU. Those no longer wanted go.
     fn reconcile(&mut self) {
-        let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
+        let (Some(me), Some(hub)) = (self.me, self.hub) else {
+            return;
+        };
         let wanted: Vec<u64> = if me == hub {
-            self.members.iter().filter(|(id, link)| *id != me && *link != Some(Link::Sfu)).map(|(id, _)| *id).collect()
-        } else if self.members.iter().any(|(id, _)| *id == hub) && self.link_of(me) != Some(Link::Sfu) {
+            self.members
+                .iter()
+                .filter(|(id, link)| *id != me && *link != Some(Link::Sfu))
+                .map(|(id, _)| *id)
+                .collect()
+        } else if self.members.iter().any(|(id, _)| *id == hub)
+            && self.link_of(me) != Some(Link::Sfu)
+        {
             vec![hub]
         } else {
             vec![]
         };
-        let gone: Vec<u64> = self.peers.keys().copied().filter(|id| !wanted.contains(id)).collect();
+        let gone: Vec<u64> = self
+            .peers
+            .keys()
+            .copied()
+            .filter(|id| !wanted.contains(id))
+            .collect();
         for id in gone {
             self.peers.remove(&id);
             self.out.push(Action::Close(id));
@@ -192,28 +233,46 @@ impl Star {
             if !self.direct {
                 // No direct links here: the room puts this game (or, on the hub, that member) on the
                 // SFU at once instead of after its wait.
-                if !self.reported_down.contains(&id) && self.link_of(if me == hub { id } else { me }).is_none() {
+                if !self.reported_down.contains(&id)
+                    && self.link_of(if me == hub { id } else { me }).is_none()
+                {
                     self.reported_down.push(id);
                     self.report(id, false);
                 }
                 continue;
             }
-            self.peers.insert(id, PeerState { up: false, heard: 0, sent: 0 });
-            self.out.push(Action::Connect { member: id, offerer: me == hub });
+            self.peers.insert(
+                id,
+                PeerState {
+                    up: false,
+                    heard: 0,
+                    sent: 0,
+                },
+            );
+            self.out.push(Action::Connect {
+                member: id,
+                offerer: me == hub,
+            });
         }
     }
 
     /// The link report for the room: the link between the hub and `other`'s end of it.
     fn report(&mut self, other: u64, up: bool) {
-        let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
+        let (Some(me), Some(hub)) = (self.me, self.hub) else {
+            return;
+        };
         let member = if me == hub { other } else { me };
-        self.out.push(Action::Room(json!({"type": "p2p_link", "hub": hub, "member": member, "up": up})));
+        self.out.push(Action::Room(
+            json!({"type": "p2p_link", "hub": hub, "member": member, "up": up}),
+        ));
     }
 
     /// The transport's news of a peer connection: up, or failed (it never came up, or its path
     /// stopped answering). A failed one is gone; the room hears both.
     pub fn link(&mut self, member: u64, up: bool, now: u64) {
-        let Some(peer) = self.peers.get_mut(&member) else { return };
+        let Some(peer) = self.peers.get_mut(&member) else {
+            return;
+        };
         if up {
             if peer.up {
                 return;
@@ -245,27 +304,42 @@ impl Star {
     }
 
     fn slot_active(&self, slot: u8) -> bool {
-        self.race.as_ref().is_some_and(|r| (slot as usize) < r.slots.len() && !r.left.contains(&slot))
+        self.race
+            .as_ref()
+            .is_some_and(|r| (slot as usize) < r.slots.len() && !r.left.contains(&slot))
     }
 
     /// Racers on the SFU (the hub never is).
     fn fallback_racers(&self) -> Vec<u64> {
-        let Some(race) = self.race.as_ref() else { return vec![] };
-        race.slots.iter().enumerate()
-            .filter(|(slot, id)| !race.left.contains(&(*slot as u8)) && Some(**id) != self.hub && self.link_of(**id) == Some(Link::Sfu))
-            .map(|(_, id)| *id).collect()
+        let Some(race) = self.race.as_ref() else {
+            return vec![];
+        };
+        race.slots
+            .iter()
+            .enumerate()
+            .filter(|(slot, id)| {
+                !race.left.contains(&(*slot as u8))
+                    && Some(**id) != self.hub
+                    && self.link_of(**id) == Some(Link::Sfu)
+            })
+            .map(|(_, id)| *id)
+            .collect()
     }
 
     /// The publishers whose SFU channels this game needs open for the race (its sfu_ready waits for
     /// them): the hub, the fallback racers; a fallback racer, the hub and the other fallback racers;
     /// a star member, none.
     pub fn sfu_expect(&self) -> Vec<u64> {
-        let (Some(me), Some(hub)) = (self.me, self.hub) else { return vec![] };
+        let (Some(me), Some(hub)) = (self.me, self.hub) else {
+            return vec![];
+        };
         let fallback = self.fallback_racers();
         if me == hub {
             fallback
         } else if fallback.contains(&me) {
-            std::iter::once(hub).chain(fallback.into_iter().filter(|id| *id != me)).collect()
+            std::iter::once(hub)
+                .chain(fallback.into_iter().filter(|id| *id != me))
+                .collect()
         } else {
             vec![]
         }
@@ -276,7 +350,11 @@ impl Star {
     pub fn on_sfu(&self) -> bool {
         let Some(me) = self.me else { return false };
         let fallback = self.fallback_racers();
-        if self.is_hub() { !fallback.is_empty() } else { fallback.contains(&me) }
+        if self.is_hub() {
+            !fallback.is_empty()
+        } else {
+            fallback.contains(&me)
+        }
     }
 
     /// The running race's start for this game's SFU association when the game itself doesn't race
@@ -287,7 +365,12 @@ impl Star {
         if race.slots.contains(&me) {
             return None;
         }
-        let players: Vec<Value> = race.slots.iter().enumerate().map(|(slot, id)| json!({"slot": slot, "memberId": id})).collect();
+        let players: Vec<Value> = race
+            .slots
+            .iter()
+            .enumerate()
+            .map(|(slot, id)| json!({"slot": slot, "memberId": id}))
+            .collect();
         Some(json!({"type": "start", "startAt": race.marker, "players": players}))
     }
 
@@ -302,10 +385,16 @@ impl Star {
 
     /// Sends a stamped frame to every racer on the star but `except`.
     fn to_star(&mut self, frame: &[u8], except: u64) {
-        let Some(bytes) = self.envelope(frame) else { return };
+        let Some(bytes) = self.envelope(frame) else {
+            return;
+        };
         let reliable = frame[0] == EVENT;
-        let targets: Vec<u64> = self.peers.iter().filter(|(id, p)| p.up && **id != except && self.active_slot(**id).is_some())
-            .map(|(id, _)| *id).collect();
+        let targets: Vec<u64> = self
+            .peers
+            .iter()
+            .filter(|(id, p)| p.up && **id != except && self.active_slot(**id).is_some())
+            .map(|(id, _)| *id)
+            .collect();
         for id in targets {
             self.out.push(Action::Peer(id, reliable, bytes.clone()));
         }
@@ -326,8 +415,12 @@ impl Star {
     /// star (and the SFU when it bridges), or on the SFU for a fallback racer. Dropped while this
     /// game has no way into the race (its link to a new hub still being made).
     pub fn game_frame(&mut self, frame: &[u8]) {
-        let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
-        let Some(slot) = self.active_slot(me) else { return };
+        let (Some(me), Some(hub)) = (self.me, self.hub) else {
+            return;
+        };
+        let Some(slot) = self.active_slot(me) else {
+            return;
+        };
         let mut frame = frame.to_vec();
         if frame.len() < 2 {
             return;
@@ -352,7 +445,9 @@ impl Star {
 
     /// A message from a peer connection.
     pub fn peer_message(&mut self, from: u64, reliable: bool, bytes: &[u8], now: u64) {
-        let Some(peer) = self.peers.get_mut(&from) else { return };
+        let Some(peer) = self.peers.get_mut(&from) else {
+            return;
+        };
         peer.heard = now;
         if bytes.first() != Some(&KIND_FRAME) || bytes.len() < 11 {
             return;
@@ -366,9 +461,13 @@ impl Star {
         if frame[0] != if reliable { EVENT } else { STATE } {
             return;
         }
-        let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
+        let (Some(me), Some(hub)) = (self.me, self.hub) else {
+            return;
+        };
         if me == hub {
-            let Some(slot) = self.active_slot(from) else { return };
+            let Some(slot) = self.active_slot(from) else {
+                return;
+            };
             frame[1] = slot;
             if !Self::valid(&frame) {
                 return;
@@ -380,7 +479,11 @@ impl Star {
             if self.on_sfu() {
                 self.out.push(Action::Sfu(frame));
             }
-        } else if from == hub && Self::valid(&frame) && self.slot_active(frame[1]) && self.active_slot(me).is_some_and(|s| s != frame[1]) {
+        } else if from == hub
+            && Self::valid(&frame)
+            && self.slot_active(frame[1])
+            && self.active_slot(me).is_some_and(|s| s != frame[1])
+        {
             self.out.push(Action::Game(frame));
         }
     }
@@ -389,7 +492,9 @@ impl Star {
     /// hub's may carry any racer's slot (it bridges the star); anyone else's must carry its own. The
     /// hub forwards a fallback racer's frame into the star.
     pub fn sfu_frame(&mut self, from: u64, frame: Vec<u8>) {
-        let (Some(me), Some(hub)) = (self.me, self.hub) else { return };
+        let (Some(me), Some(hub)) = (self.me, self.hub) else {
+            return;
+        };
         if !Self::valid(&frame) || !self.slot_active(frame[1]) {
             return;
         }

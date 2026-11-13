@@ -320,10 +320,11 @@ def main():
     if t.android:
         import sdl3
         ndk = sdl3.android_ndk()
-        tools = ndk / 'toolchains/llvm/prebuilt/windows-x86_64/bin'
-        cc, ar = tools / 'clang.exe', tools / 'llvm-ar.exe'
-        if not cc.exists():
-            p.error('no NDK clang at %s' % cc)
+        tools = sdl3.android_toolchain_bin(ndk)
+        suffix = '.exe' if os.name == 'nt' else ''
+        cc, ar = tools / ('clang' + suffix), tools / ('llvm-ar' + suffix)
+        if not cc.is_file() or not ar.is_file():
+            p.error('NDK host tools are missing under %s' % tools)
     elif t.posix:
         ndk, tools, cc, ar = None, None, 'clang', 'ar'
     if a.fiber_test:
@@ -562,8 +563,9 @@ def main():
                  '-Wl,-z,max-page-size=16384', '-Wl,-z,noexecstack', '-Wl,-z,relro', '-Wl,-z,now',
                  '-landroid', *rust_libs, '-lm'], timeout=1800)
             exe = lib_dir/t.exe
-            run([tools/'llvm-strip.exe', '--strip-unneeded', '-o', exe, debug])
-            run([tools/'llvm-strip.exe', '--strip-unneeded', '-o', lib_dir/'libSDL3.so', sdl_lib])
+            strip = tools / ('llvm-strip.exe' if os.name == 'nt' else 'llvm-strip')
+            run([strip, '--strip-unneeded', '-o', exe, debug])
+            run([strip, '--strip-unneeded', '-o', lib_dir/'libSDL3.so', sdl_lib])
         elif t.mac:
             # ld64: -dead_strip as --gc-sections; no -rdynamic (exporting every symbol keeps the
             # module-side code of fps.c alive, which names guest data the host does not have); -S: no

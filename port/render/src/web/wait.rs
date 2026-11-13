@@ -56,7 +56,12 @@ fn resolver() -> (Promise, Function) {
     let mut resolve = None;
     let promise = Promise::new(&mut |r, _reject| resolve = Some(r));
     // The executor runs inside Promise::new, so resolve is set.
-    (promise, resolve.unwrap_or_else(|| crate::guard::fatal("dhd_render: Promise::new did not run its executor")))
+    (
+        promise,
+        resolve.unwrap_or_else(|| {
+            crate::guard::fatal("dhd_render: Promise::new did not run its executor")
+        }),
+    )
 }
 
 /// Settles `resolve` with 1 (`ok`) or 0. Called with the slot not borrowed.
@@ -138,7 +143,9 @@ pub fn copy_mapped(view: &wgpu::BufferView, from: usize, dst: &mut [u8]) {
     #[cfg(feature = "web")]
     {
         let start = from as u32;
-        view.as_uint8array().subarray(start, start + dst.len() as u32).copy_to(dst);
+        view.as_uint8array()
+            .subarray(start, start + dst.len() as u32)
+            .copy_to(dst);
     }
     #[cfg(not(feature = "web"))]
     dst.copy_from_slice(&view[from..from + dst.len()]);
@@ -159,7 +166,9 @@ pub async fn work_done(queue: &wgpu::Queue) {
     queue.on_submitted_work_done(move || {
         let r = DONE.with(|d| {
             let mut d = d.borrow_mut();
-            d.iter().position(|(i, _)| *i == id).map(|at| d.swap_remove(at).1)
+            d.iter()
+                .position(|(i, _)| *i == id)
+                .map(|at| d.swap_remove(at).1)
         });
         if let Some(r) = r {
             call(r, true);
@@ -174,5 +183,6 @@ pub async fn work_done(queue: &wgpu::Queue) {
 #[cfg(feature = "web")]
 #[wasm_bindgen]
 pub fn dhdr_web_pending() -> js_sys::Promise {
-    SLOT.with(|s| s.borrow_mut().promise.take()).unwrap_or_else(|| Promise::resolve(&JsValue::from(1)))
+    SLOT.with(|s| s.borrow_mut().promise.take())
+        .unwrap_or_else(|| Promise::resolve(&JsValue::from(1)))
 }

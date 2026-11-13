@@ -13,7 +13,9 @@ use png::{BitDepth, ColorType, Decoder, Limits, Transformations};
 
 /// The picture's width and height, from its header.
 pub fn size(data: &[u8]) -> Result<(u32, u32), String> {
-    let reader = Decoder::new(Cursor::new(data)).read_info().map_err(|e| e.to_string())?;
+    let reader = Decoder::new(Cursor::new(data))
+        .read_info()
+        .map_err(|e| e.to_string())?;
     let info = reader.info();
     Ok((info.width, info.height))
 }
@@ -39,7 +41,9 @@ pub fn decode(data: &[u8], out: &mut [u8], w: u32, h: u32, opaque: u8) -> Result
     if out.len() < pixels * 4 || rows != pixels * channels {
         return Err(format!("{} bytes for {w} x {h} {color:?}", out.len()));
     }
-    reader.next_frame(&mut out[..rows]).map_err(|e| e.to_string())?;
+    reader
+        .next_frame(&mut out[..rows])
+        .map_err(|e| e.to_string())?;
     // Widen in place, from the end, so no sample is overwritten before it is read.
     match color {
         ColorType::Rgba => {}

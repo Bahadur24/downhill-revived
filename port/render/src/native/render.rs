@@ -38,8 +38,11 @@ use crate::abi::*;
 use crate::device::Gpu;
 use crate::native::arenas::Arenas;
 use crate::native::convert::{ConvertObjects, ConvertSource};
+use crate::native::pipelines::{
+    gputimes, without_kept_colour, MESH, MESH_TWO_SIDED, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT,
+    VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128,
+};
 use crate::native::scanout::ScanoutObjects;
-use crate::native::pipelines::{gputimes, without_kept_colour, MESH, MESH_TWO_SIDED, SPEC_SHIFT, TEXELS, TEXEL_SCALE_SHIFT, VARIANT_ALPHA_ONLY, VARIANT_DUAL, VARIANT_PLAIN, VARIANT_RGB_A128};
 use crate::native::shared::NativeShared;
 use crate::native::surfaces::Kit;
 use crate::native::{Native, Picture};
@@ -87,7 +90,9 @@ mod finisher {
                 self.helper = Helper::start();
                 self.failed = self.helper.is_none();
             }
-            let Some(helper) = self.helper.as_ref() else { return Err(encoder) };
+            let Some(helper) = self.helper.as_ref() else {
+                return Err(encoder);
+            };
             match helper.jobs.send((encoder, cores::mine())) {
                 Ok(()) => {
                     self.pending += 1;
@@ -109,7 +114,9 @@ mod finisher {
                 match self.helper.as_ref().map(|h| h.done.recv()) {
                     Some(Ok(commands)) => all.push(commands),
                     // its commands are part of the picture: never carry on without them
-                    _ => crate::guard::fatal("dhd_render: the encoder thread ended while it held a picture's encoder"),
+                    _ => crate::guard::fatal(
+                        "dhd_render: the encoder thread ended while it held a picture's encoder",
+                    ),
                 }
             }
             self.pending = 0;
@@ -122,20 +129,24 @@ mod finisher {
         fn start() -> Option<Helper> {
             let (jobs, inbox) = channel::<(wgpu::CommandEncoder, cores::Mask)>();
             let (outbox, done) = channel();
-            let spawned = std::thread::Builder::new().name("dhd-encode".into()).spawn(move || {
-                let mut placed = cores::Mask::default();
-                // Ends when the Finisher (the sender) is dropped.
-                while let Ok((encoder, mask)) = inbox.recv() {
-                    cores::follow(&mask, &mut placed);
-                    if outbox.send(encoder.finish()).is_err() {
-                        break;
+            let spawned = std::thread::Builder::new()
+                .name("dhd-encode".into())
+                .spawn(move || {
+                    let mut placed = cores::Mask::default();
+                    // Ends when the Finisher (the sender) is dropped.
+                    while let Ok((encoder, mask)) = inbox.recv() {
+                        cores::follow(&mask, &mut placed);
+                        if outbox.send(encoder.finish()).is_err() {
+                            break;
+                        }
                     }
-                }
-            });
+                });
             match spawned {
                 Ok(_) => Some(Helper { jobs, done }),
                 Err(e) => {
-                    crate::host::log(&format!("gs native: no encoder thread ({e}); a picture stays in one encoder"));
+                    crate::host::log(&format!(
+                        "gs native: no encoder thread ({e}); a picture stays in one encoder"
+                    ));
                     None
                 }
             }
@@ -160,7 +171,8 @@ mod finisher {
         pub fn mine() -> Mask {
             let mut mask = Mask::default();
             // SAFETY: the mask is `size` writable bytes; pid 0 is the calling thread.
-            if unsafe { sched_getaffinity(0, std::mem::size_of::<Mask>(), mask.as_mut_ptr()) } != 0 {
+            if unsafe { sched_getaffinity(0, std::mem::size_of::<Mask>(), mask.as_mut_ptr()) } != 0
+            {
                 mask = Mask::default();
             }
             mask
@@ -238,7 +250,9 @@ fn cut_point(draws: usize, work: usize, vendor: u32) -> Option<usize> {
         let mali = vendor == crate::device::VENDOR_ARM;
         if mali && asked.is_none() {
             static SAID: std::sync::Once = std::sync::Once::new();
-            SAID.call_once(|| crate::host::log("gs native: a picture stays in one encoder on this GPU (Mali)"));
+            SAID.call_once(|| {
+                crate::host::log("gs native: a picture stays in one encoder on this GPU (Mali)")
+            });
         }
         let percent = asked.unwrap_or(if mali { 0 } else { 60 });
         (percent != 0 && draws >= CUT_MIN_DRAWS).then(|| work * percent / 100)
@@ -327,21 +341,36 @@ struct PassState {
 /// The pixels draw `first..first + count` of `vertices` (through `indices` when given) can touch: its
 /// vertices' bounding box at `scale`, one pixel wider, cut to the scissor (left, top, width, height);
 /// left, top, right, bottom. DHD_PASS_TRACE.
-fn draw_bounds(vertices: &[DhdrVertex], indices: Option<&[u32]>, first: u32, count: u32, scale: u32,
-               scissor: [u32; 4]) -> Option<[u32; 4]> {
+fn draw_bounds(
+    vertices: &[DhdrVertex],
+    indices: Option<&[u32]>,
+    first: u32,
+    count: u32,
+    scale: u32,
+    scissor: [u32; 4],
+) -> Option<[u32; 4]> {
     let (mut l, mut t, mut r, mut b) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
     for i in first..first.saturating_add(count) {
         let v = match indices {
             Some(ix) => ix.get(i as usize).and_then(|&j| vertices.get(j as usize)),
             None => vertices.get(i as usize),
         }?;
-        l = l.min(v.x); t = t.min(v.y); r = r.max(v.x); b = b.max(v.y);
+        l = l.min(v.x);
+        t = t.min(v.y);
+        r = r.max(v.x);
+        b = b.max(v.y);
     }
     let s = scale as f32;
     let clip = |v: f32, lo: u32, hi: u32| (v.max(lo as f32).min(hi as f32)) as u32;
     let [x, y, w, h] = scissor;
-    let (l, t) = (clip((l * s).floor() - 1.0, x, x + w), clip((t * s).floor() - 1.0, y, y + h));
-    let (r, b) = (clip((r * s).ceil() + 1.0, x, x + w), clip((b * s).ceil() + 1.0, y, y + h));
+    let (l, t) = (
+        clip((l * s).floor() - 1.0, x, x + w),
+        clip((t * s).floor() - 1.0, y, y + h),
+    );
+    let (r, b) = (
+        clip((r * s).ceil() + 1.0, x, x + w),
+        clip((b * s).ceil() + 1.0, y, y + h),
+    );
     (r > l && b > t).then_some([l, t, r, b])
 }
 
@@ -412,11 +441,15 @@ impl Pass {
     /// has.
     fn set_state(&mut self, w: u32, h: u32, scissor: [u32; 4], blend_fix: Option<u32>) {
         let s = &self.state;
-        if s.viewport != Some([w, h]) || s.scissor != Some(scissor)
-            || blend_fix.is_some_and(|b| s.blend != Some(b)) {
+        if s.viewport != Some([w, h])
+            || s.scissor != Some(scissor)
+            || blend_fix.is_some_and(|b| s.blend != Some(b))
+        {
             self.flush();
         }
-        let Some(pass) = self.pass.as_mut() else { return };
+        let Some(pass) = self.pass.as_mut() else {
+            return;
+        };
         let s = &mut self.state;
         if s.viewport != Some([w, h]) {
             pass.set_viewport(0.0, 0.0, w as f32, h as f32, 0.0, 1.0);
@@ -428,7 +461,12 @@ impl Pass {
         }
         if let Some(blend_fix) = blend_fix.filter(|&b| s.blend != Some(b)) {
             let fix = blend_fix as f64 / 128.0;
-            pass.set_blend_constant(wgpu::Color { r: fix, g: fix, b: fix, a: fix });
+            pass.set_blend_constant(wgpu::Color {
+                r: fix,
+                g: fix,
+                b: fix,
+                a: fix,
+            });
             s.blend = Some(blend_fix);
         }
     }
@@ -439,7 +477,9 @@ impl Pass {
         if self.state.offset != Some(offset) || self.state.group.as_ref() != Some(group) {
             self.flush();
         }
-        let Some(pass) = self.pass.as_mut() else { return };
+        let Some(pass) = self.pass.as_mut() else {
+            return;
+        };
         let s = &mut self.state;
         if s.offset != Some(offset) {
             pass.set_bind_group(0, uniforms, &[offset]);
@@ -475,7 +515,10 @@ impl Pass {
     fn split(&mut self, gpu: &Gpu) -> (&mut wgpu::CommandEncoder, &mut DhdrPictureResult) {
         self.end();
         let encoder = self.encoder.get_or_insert_with(|| {
-            gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native picture") })
+            gpu.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("native picture"),
+                })
         });
         (encoder, &mut self.drawn)
     }
@@ -489,11 +532,27 @@ impl Pass {
     /// storing both, with the whole vertex buffer at slot 0 (and in an indexed picture the whole
     /// index buffer). `size`: the attachments' size (DHD_PASS_TRACE).
     #[allow(clippy::too_many_arguments)]
-    fn begin(&mut self, gpu: &Gpu, target: i32, depth: i32, size: [u32; 2], color: &wgpu::TextureView,
-             z: Option<&wgpu::TextureView>, vertices: &wgpu::Buffer, vertex_bytes: u64,
-             indices: Option<&(wgpu::Buffer, u64)>) {
-        self.end_reason(if self.target != target { "target-change" } else { "depth-change" });
-        let keep = wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store };
+    fn begin(
+        &mut self,
+        gpu: &Gpu,
+        target: i32,
+        depth: i32,
+        size: [u32; 2],
+        color: &wgpu::TextureView,
+        z: Option<&wgpu::TextureView>,
+        vertices: &wgpu::Buffer,
+        vertex_bytes: u64,
+        indices: Option<&(wgpu::Buffer, u64)>,
+    ) {
+        self.end_reason(if self.target != target {
+            "target-change"
+        } else {
+            "depth-change"
+        });
+        let keep = wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store: wgpu::StoreOp::Store,
+        };
         let times = gputimes::slot(gpu, gputimes::DRAW);
         let encoder = self.encoder(gpu);
         let mut pass = encoder
@@ -503,7 +562,10 @@ impl Pass {
                     view: color,
                     depth_slice: None,
                     resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
                 })],
                 depth_stencil_attachment: z.map(|view| wgpu::RenderPassDepthStencilAttachment {
                     view,
@@ -527,14 +589,23 @@ impl Pass {
         #[cfg(not(target_arch = "wasm32"))]
         self.stats.pass();
         if pass_trace::on() {
-            pass_trace::event(&format!("draw-begin:load/store {}x{}", size[0], size[1]), target, depth);
+            pass_trace::event(
+                &format!("draw-begin:load/store {}x{}", size[0], size[1]),
+                target,
+                depth,
+            );
         }
     }
 
     /// native_set_pipeline in the open pass: false (reported once per key) when the key has no
     /// pipeline; the draw is then skipped.
-    fn set_pipeline(&mut self, gpu: &'static Gpu, n: &mut crate::native::pipelines::Pipelines,
-                    objects: &crate::native::init::Objects, key: u64) -> bool {
+    fn set_pipeline(
+        &mut self,
+        gpu: &'static Gpu,
+        n: &mut crate::native::pipelines::Pipelines,
+        objects: &crate::native::init::Objects,
+        key: u64,
+    ) -> bool {
         if self.pipe == Some(key) {
             return true;
         }
@@ -624,7 +695,9 @@ impl Pass {
 
     /// native_submit: ends the pass, writes the arenas the encoder's commands read, submits.
     fn submit(&mut self, gpu: &Gpu, arenas: &Arenas) {
-        if !self.deferred { self.submit_now(gpu, arenas); }
+        if !self.deferred {
+            self.submit_now(gpu, arenas);
+        }
     }
 
     pub fn submit_now(&mut self, gpu: &Gpu, arenas: &Arenas) {
@@ -633,12 +706,17 @@ impl Pass {
         let cut = self.finisher.pending() != 0;
         #[cfg(target_arch = "wasm32")]
         let cut = false;
-        if self.encoder.is_none() && !cut { return; }
+        if self.encoder.is_none() && !cut {
+            return;
+        }
         let t = rstat::T::new();
         arenas.write(&gpu.queue);
         t.add(rstat::AWRITE);
         let encoder = self.encoder.take().unwrap_or_else(|| {
-            gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("native picture") })
+            gpu.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("native picture"),
+                })
         });
         #[cfg(not(target_arch = "wasm32"))]
         crate::native::pipelines::pipelog::submit();
@@ -687,14 +765,23 @@ fn has_texture(s: Option<&DhdrSurfaceInfo>) -> bool {
 /// alpha factors are One and Zero, and the alpha-only second draw does not blend).
 fn uses_constant(blend_key: u32) -> bool {
     let (src, dst) = (blend_key >> 1 & 31, blend_key >> 6 & 31);
-    blend_key & 1 != 0 && (src == BLEND_FACTOR || src == BLEND_INV_FACTOR || dst == BLEND_FACTOR || dst == BLEND_INV_FACTOR)
+    blend_key & 1 != 0
+        && (src == BLEND_FACTOR
+            || src == BLEND_INV_FACTOR
+            || dst == BLEND_FACTOR
+            || dst == BLEND_INV_FACTOR)
 }
 
 /// The draw constants as the uniform block's bytes.
 fn constant_bytes(c: &DhdrNativeConstants) -> &[u8] {
     // SAFETY: DhdrNativeConstants is repr(C) with 56 four-byte fields and no padding, so every
     // byte is initialised; the length is its size.
-    unsafe { std::slice::from_raw_parts((c as *const DhdrNativeConstants).cast::<u8>(), std::mem::size_of_val(c)) }
+    unsafe {
+        std::slice::from_raw_parts(
+            (c as *const DhdrNativeConstants).cast::<u8>(),
+            std::mem::size_of_val(c),
+        )
+    }
 }
 
 impl Native {
@@ -706,7 +793,11 @@ impl Native {
     /// `picture`, or with `indices` (`dhdr_native_picture_indexed`) an indexed picture: each
     /// DRAW's first and count are a range of `indices`, which index `p.vertices`. The triangles,
     /// their order and their vertices' bytes are those of the expanded picture.
-    pub fn picture_indexed(&mut self, p: &Picture, indices: Option<&[u32]>) -> Result<DhdrPictureResult, String> {
+    pub fn picture_indexed(
+        &mut self,
+        p: &Picture,
+        indices: Option<&[u32]>,
+    ) -> Result<DhdrPictureResult, String> {
         #[cfg(not(target_arch = "wasm32"))]
         let _spike = crate::native::pipelines::SpikeTimer::new("picture", 0);
         let whole = rstat::T::new();
@@ -718,22 +809,41 @@ impl Native {
         self.pass.stats.picture_begin(gpu);
         let shared = NativeShared::get(gpu)?;
         let t = rstat::T::new();
-        self.arenas.reserve(Some((gpu, &self.objects.uniform_layout)), p.commands, p.vertices.len() as u32)?;
+        self.arenas.reserve(
+            Some((gpu, &self.objects.uniform_layout)),
+            p.commands,
+            p.vertices.len() as u32,
+        )?;
         if let Some(indices) = indices {
-            let count = u32::try_from(indices.len()).map_err(|_| format!("gs native: {} indices", indices.len()))?;
+            let count = u32::try_from(indices.len())
+                .map_err(|_| format!("gs native: {} indices", indices.len()))?;
             self.arenas.reserve_indices(gpu, p.commands, count)?;
         }
         t.add(rstat::RESERVE);
         rstat::tally(rstat::COMMANDS, p.commands.len() as u64);
         rstat::tally(rstat::VERTICES, p.vertices.len() as u64);
         rstat::tally(rstat::INDICES, indices.map_or(0, |i| i.len() as u64));
-        self.arenas.reserve_draws(gpu, &self.objects.draws_layout, p.commands)?;
-        let uniforms = self.arenas.draw_group().cloned().ok_or("gs native: no draw constants bind group")?;
-        let vertices = self.arenas.vertex_buffer().cloned().ok_or("gs native: no vertex buffer")?;
+        self.arenas
+            .reserve_draws(gpu, &self.objects.draws_layout, p.commands)?;
+        let uniforms = self
+            .arenas
+            .draw_group()
+            .cloned()
+            .ok_or("gs native: no draw constants bind group")?;
+        let vertices = self
+            .arenas
+            .vertex_buffer()
+            .cloned()
+            .ok_or("gs native: no vertex buffer")?;
         let vertex_bytes = self.arenas.vertex_capacity();
         let index_buffer = match indices {
-            Some(_) => Some((self.arenas.index_buffer().cloned().ok_or("gs native: no index buffer")?,
-                             self.arenas.index_capacity())),
+            Some(_) => Some((
+                self.arenas
+                    .index_buffer()
+                    .cloned()
+                    .ok_or("gs native: no index buffer")?,
+                self.arenas.index_capacity(),
+            )),
             None => None,
         };
         self.pass.end();
@@ -751,8 +861,19 @@ impl Native {
             self.surfaces.prepare(&mut kit)?;
         }
         t.add(rstat::SURFACES);
-        let mesh = self.objects.mesh_layout.clone().and_then(|layout| self.arenas.mesh_group(gpu, &layout));
-        let views = Views { shared, uniforms, vertices, vertex_bytes, indices: index_buffer, mesh };
+        let mesh = self
+            .objects
+            .mesh_layout
+            .clone()
+            .and_then(|layout| self.arenas.mesh_group(gpu, &layout));
+        let views = Views {
+            shared,
+            uniforms,
+            vertices,
+            vertex_bytes,
+            indices: index_buffer,
+            mesh,
+        };
         let t = rstat::T::new();
         self.render(p, indices, &views);
         t.add(rstat::RECORD);
@@ -775,7 +896,9 @@ impl Native {
         timing.end(self.pass.encoder(gpu));
         self.pass.timing = timing;
         self.pass.submit(gpu, &self.arenas);
-        if !self.pass.deferred { self.zread_map(); }
+        if !self.pass.deferred {
+            self.zread_map();
+        }
         t.add(rstat::SUBMIT);
         let mut r = self.pass.drawn;
         r.shown = shown as u32;
@@ -795,23 +918,37 @@ impl Native {
         // Reuse only while none of those surfaces has been written this picture.
         // Keep the existing consecutive-run rule (last_convert) exactly as before.
         let mut versions = vec![0u64; p.surfaces.len()];
-        let mut conversions: Vec<Option<([u64; 4], wgpu::BindGroup)>> = vec![None; p.converts.len()];
+        let mut conversions: Vec<Option<([u64; 4], wgpu::BindGroup)>> =
+            vec![None; p.converts.len()];
         // Where the picture's encoder is cut and its first part handed to the helper thread
         // (finding 195): at the first pass that begins once this much of its work is behind.
         let mut last_pass = None;
-        let all_work: usize = p.commands.iter().map(|k| encode_work(k, &mut last_pass)).sum();
+        let all_work: usize = p
+            .commands
+            .iter()
+            .map(|k| encode_work(k, &mut last_pass))
+            .sum();
         #[cfg(not(target_arch = "wasm32"))]
         let vendor = gpu.info.vendor;
         #[cfg(target_arch = "wasm32")]
         let vendor = 0;
-        let mut cut_at = cut_point(p.commands.iter().filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0).count(), all_work, vendor);
+        let mut cut_at = cut_point(
+            p.commands
+                .iter()
+                .filter(|k| k.kind == DHDR_CMD_DRAW && k.count != 0)
+                .count(),
+            all_work,
+            vendor,
+        );
         let (mut work, mut last_pass) = (0usize, None);
         for (i, k) in p.commands.iter().enumerate() {
             let cut_due = cut_at.is_some_and(|at| work >= at);
             work += encode_work(k, &mut last_pass);
             match k.kind {
                 DHDR_CMD_ALPHA_UPLOAD => {
-                    if let Some(v) = versions.get_mut(k.target as usize) { *v += 1; }
+                    if let Some(v) = versions.get_mut(k.target as usize) {
+                        *v += 1;
+                    }
                     self.transfer(k, p.pixels(i), v.shared);
                     last_convert = -1;
                     continue;
@@ -822,7 +959,9 @@ impl Native {
                     if !has_texture(s) || s.is_some_and(|s| s.depth != 0) {
                         continue;
                     }
-                    if let Some(v) = versions.get_mut(k.target as usize) { *v += 1; }
+                    if let Some(v) = versions.get_mut(k.target as usize) {
+                        *v += 1;
+                    }
                     self.transfer(k, p.pixels(i), v.shared);
                     continue;
                 }
@@ -831,7 +970,9 @@ impl Native {
                     if !has_texture(surface(p, k.source)) || !has_texture(surface(p, k.target)) {
                         continue;
                     }
-                    if let Some(v) = versions.get_mut(k.target as usize) { *v += 1; }
+                    if let Some(v) = versions.get_mut(k.target as usize) {
+                        *v += 1;
+                    }
                     self.transfer(k, None, v.shared);
                     continue;
                 }
@@ -840,9 +981,18 @@ impl Native {
             if k.count == 0 {
                 continue;
             }
-            let Some(target) = surface(p, k.target).filter(|t| has_texture(Some(t)) && t.depth == 0) else { continue };
-            let mut depth = if k.depth >= 0 && k.depth_key & 8 != 0 { surface(p, k.depth) } else { None };
-            if depth.is_some_and(|d| !has_texture(Some(d)) || d.depth == 0 || d.size != target.size) {
+            let Some(target) =
+                surface(p, k.target).filter(|t| has_texture(Some(t)) && t.depth == 0)
+            else {
+                continue;
+            };
+            let mut depth = if k.depth >= 0 && k.depth_key & 8 != 0 {
+                surface(p, k.depth)
+            } else {
+                None
+            };
+            if depth.is_some_and(|d| !has_texture(Some(d)) || d.depth == 0 || d.size != target.size)
+            {
                 depth = None;
             }
             // At an attachment boundary, prepare independent conversions for the
@@ -855,16 +1005,41 @@ impl Native {
                 // ... and in one compute pass, a dispatch each (`convert_dispatch`).
                 let (mut stamps, mut ready) = (Vec::new(), Vec::new());
                 for (j, next) in p.commands.iter().enumerate().skip(i) {
-                    if next.kind != DHDR_CMD_DRAW || next.target != k.target || next.depth != k.depth
-                        || next.depth_key & 8 != k.depth_key & 8 { break; }
-                    if next.convert < 0 || next.convert as i32 == last_convert
-                        || next.texture_surface >= 0 || p.replacement(j).is_some()
-                        || p.texture(j).is_some() || !prepared.insert(next.convert) { continue; }
+                    if next.kind != DHDR_CMD_DRAW
+                        || next.target != k.target
+                        || next.depth != k.depth
+                        || next.depth_key & 8 != k.depth_key & 8
+                    {
+                        break;
+                    }
+                    if next.convert < 0
+                        || next.convert as i32 == last_convert
+                        || next.texture_surface >= 0
+                        || p.replacement(j).is_some()
+                        || p.texture(j).is_some()
+                        || !prepared.insert(next.convert)
+                    {
+                        continue;
+                    }
                     let ci = next.convert as usize;
-                    let Some(c) = p.converts.get(ci) else { continue };
-                    if c.surface.iter().any(|&s| s >= 0 && (s == k.target || s == k.depth)) { continue; }
-                    let stamp = c.surface.map(|s| versions.get(s as usize).copied().unwrap_or(0));
-                    if conversions[ci].as_ref().is_some_and(|(old, _)| *old == stamp) { continue; }
+                    let Some(c) = p.converts.get(ci) else {
+                        continue;
+                    };
+                    if c.surface
+                        .iter()
+                        .any(|&s| s >= 0 && (s == k.target || s == k.depth))
+                    {
+                        continue;
+                    }
+                    let stamp = c
+                        .surface
+                        .map(|s| versions.get(s as usize).copied().unwrap_or(0));
+                    if conversions[ci]
+                        .as_ref()
+                        .is_some_and(|(old, _)| *old == stamp)
+                    {
+                        continue;
+                    }
                     if let Some(r) = self.convert_ready(p, ci, v.shared) {
                         stamps.push((ci, stamp));
                         ready.push(r);
@@ -891,14 +1066,18 @@ impl Native {
                 if k.texture_surface == k.target {
                     // Sampling the target: draw from a copy of the region the texture can reach
                     // (in the scratch texture); none (C's `continue`) skips the draw.
-                    let Some(g) = self.sample_target(ts, &k.constants, v.shared) else { continue };
+                    let Some(g) = self.sample_target(ts, &k.constants, v.shared) else {
+                        continue;
+                    };
                     group = Some(g);
                 } else if let Some(g) = self.surface_group(ts, v.shared) {
                     group = Some(g);
                 }
             } else if let Some(r) = p.replacement(i) {
                 let c = &k.constants;
-                let index = (c.flags >> 5 & 1) | ((c.wrap[0] != 0) as u32) << 1 | ((c.wrap[1] != 0) as u32) << 2;
+                let index = (c.flags >> 5 & 1)
+                    | ((c.wrap[0] != 0) as u32) << 1
+                    | ((c.wrap[1] != 0) as u32) << 2;
                 group = Some(r.group(index as usize).clone());
             } else if let Some(t) = p.texture(i) {
                 group = Some(t.group(0).clone());
@@ -908,8 +1087,10 @@ impl Native {
                 // Again for each run of draws: the surface may have changed since.
                 if k.convert as i32 != last_convert {
                     let ci = k.convert as usize;
-                    let stamp = p.converts.get(ci).map(|c| c.surface.map(|s|
-                        versions.get(s as usize).copied().unwrap_or(0)));
+                    let stamp = p.converts.get(ci).map(|c| {
+                        c.surface
+                            .map(|s| versions.get(s as usize).copied().unwrap_or(0))
+                    });
                     converted = match (stamp, conversions.get(ci).and_then(Option::as_ref)) {
                         (Some(stamp), Some((old, group))) if stamp == *old => {
                             pass_trace::event("conversion-reused", k.target as i32, -1);
@@ -917,7 +1098,9 @@ impl Native {
                         }
                         _ => {
                             let group = self.convert(p, ci, v.shared);
-                            if let (Some(stamp), Some(group), Some(slot)) = (stamp, group.as_ref(), conversions.get_mut(ci)) {
+                            if let (Some(stamp), Some(group), Some(slot)) =
+                                (stamp, group.as_ref(), conversions.get_mut(ci))
+                            {
                                 *slot = Some((stamp, group.clone()));
                             }
                             group
@@ -939,12 +1122,21 @@ impl Native {
             // A depth-disabled draw may retain the current attachment. Its pipeline uses
             // Always/no-write, including the alpha fallback, so no depth value is observed
             // or modified. Never attach a new surface or bridge a color-target change.
-            let retained_depth = depth.is_none() && self.pass.target == k.target as i32
-                && self.pass.pass.is_some() && self.pass.depth >= 0;
-            let depth_index = if depth.is_some() { k.depth as i32 }
-                else if retained_depth { self.pass.depth } else { -1 };
+            let retained_depth = depth.is_none()
+                && self.pass.target == k.target as i32
+                && self.pass.pass.is_some()
+                && self.pass.depth >= 0;
+            let depth_index = if depth.is_some() {
+                k.depth as i32
+            } else if retained_depth {
+                self.pass.depth
+            } else {
+                -1
+            };
             if !self.pass.open_on(k.target as i32, depth_index) {
-                let Some(color) = self.surface_view(k.target as usize) else { continue };
+                let Some(color) = self.surface_view(k.target as usize) else {
+                    continue;
+                };
                 let z = match depth {
                     Some(_) => match self.surface_view(k.depth as usize) {
                         Some(z) => Some(z),
@@ -957,8 +1149,17 @@ impl Native {
                     self.pass.cut();
                     cut_at = None;
                 }
-                self.pass.begin(gpu, k.target as i32, depth_index, target.size, &color, z.as_ref(), &v.vertices,
-                                v.vertex_bytes, v.indices.as_ref());
+                self.pass.begin(
+                    gpu,
+                    k.target as i32,
+                    depth_index,
+                    target.size,
+                    &color,
+                    z.as_ref(),
+                    &v.vertices,
+                    v.vertex_bytes,
+                    v.indices.as_ref(),
+                );
             }
             let mut constants = k.constants;
             constants.scale = big_t | big_s << 8 | big_s.min(big_t) << 16;
@@ -977,8 +1178,18 @@ impl Native {
             if right <= left || bottom <= top {
                 continue;
             }
-            let scissor = [left as u32, top as u32, (right - left) as u32, (bottom - top) as u32];
-            self.pass.set_state(tw, th, scissor, uses_constant(k.blend_key).then_some(k.blend_fix));
+            let scissor = [
+                left as u32,
+                top as u32,
+                (right - left) as u32,
+                (bottom - top) as u32,
+            ];
+            self.pass.set_state(
+                tw,
+                th,
+                scissor,
+                uses_constant(k.blend_key).then_some(k.blend_fix),
+            );
             if pass_trace::on() {
                 let s = &mut self.pass.state;
                 let [x, y, sw, sh] = scissor;
@@ -989,14 +1200,26 @@ impl Native {
                 s.draws += 1;
                 self.pass.state.zdraws += depth.is_some() as u32;
                 let mut reads = 0u64;
-                if k.texture_surface >= 0 { reads |= 1u64 << (k.texture_surface as u32 & 63); }
-                if let Some(c) = (k.convert >= 0).then(|| p.converts.get(k.convert as usize)).flatten() {
-                    for &s in c.surface.iter().filter(|&&s| s >= 0) { reads |= 1u64 << (s as u32 & 63); }
+                if k.texture_surface >= 0 {
+                    reads |= 1u64 << (k.texture_surface as u32 & 63);
+                }
+                if let Some(c) = (k.convert >= 0)
+                    .then(|| p.converts.get(k.convert as usize))
+                    .flatten()
+                {
+                    for &s in c.surface.iter().filter(|&&s| s >= 0) {
+                        reads |= 1u64 << (s as u32 & 63);
+                    }
                 }
                 self.pass.state.reads |= reads;
                 // a mesh draw's vertices are object-space (its shader places them): its scissor
                 let bounds = if k.constants.flags & 4096 != 0 {
-                    Some([scissor[0], scissor[1], scissor[0] + scissor[2], scissor[1] + scissor[3]])
+                    Some([
+                        scissor[0],
+                        scissor[1],
+                        scissor[0] + scissor[2],
+                        scissor[1] + scissor[3],
+                    ])
                 } else {
                     draw_bounds(p.vertices, indices, k.first, k.count, big_t, scissor)
                 };
@@ -1012,14 +1235,28 @@ impl Native {
             // scale factors match and their division is an exact binary shift.
             let source_scale = constants.scale >> 8 & 255;
             let resolution = constants.scale >> 16 & 255;
-            let texel_scale = if constants.flags & (1 | 2048) == 1 && source_scale == resolution
-                && source_scale <= 8 && source_scale.is_power_of_two() { source_scale } else { 0 };
+            let texel_scale = if constants.flags & (1 | 2048) == 1
+                && source_scale == resolution
+                && source_scale <= 8
+                && source_scale.is_power_of_two()
+            {
+                source_scale
+            } else {
+                0
+            };
             let spec = if crate::native::pipelines::spec_enabled() {
                 let c = &constants;
                 // Powers of two (as the GS's): the gather's corner / size is then exact.
                 let sized = decoded == Some((c.tex_size[0], c.tex_size[1]))
-                    && c.tex_size[0].is_power_of_two() && c.tex_size[1].is_power_of_two();
-                crate::native::pipelines::spec(c.flags, [c.wrap[0], c.wrap[1]], c.atst, sized, c.alpha_scale == 255.0)
+                    && c.tex_size[0].is_power_of_two()
+                    && c.tex_size[1].is_power_of_two();
+                crate::native::pipelines::spec(
+                    c.flags,
+                    [c.wrap[0], c.wrap[1]],
+                    c.atst,
+                    sized,
+                    c.alpha_scale == 255.0,
+                )
             } else {
                 0
             };
@@ -1028,17 +1265,33 @@ impl Native {
             let texels = if decoded.is_some() { TEXELS } else { 0 };
             if k.constants.flags & 4096 != 0 {
                 // a mesh draw reads its objects' records (group 2)
-                let Some(mesh) = v.mesh.as_ref() else { continue };
+                let Some(mesh) = v.mesh.as_ref() else {
+                    continue;
+                };
                 self.pass.set_mesh_group(mesh);
             }
-            self.draw_passes(k, p.vertices, indices, depth.is_some(), retained_depth, texel_scale | texels, spec,
-                             offset, &v.uniforms, &group);
+            self.draw_passes(
+                k,
+                p.vertices,
+                indices,
+                depth.is_some(),
+                retained_depth,
+                texel_scale | texels,
+                spec,
+                offset,
+                &v.uniforms,
+                &group,
+            );
             self.pass.drawn.draws += 1;
             // Conservative even for masked/empty writes: a false invalidation costs
             // performance only. Depth also survives into later pictures/probes.
-            if let Some(v) = versions.get_mut(k.target as usize) { *v += 1; }
+            if let Some(v) = versions.get_mut(k.target as usize) {
+                *v += 1;
+            }
             if depth.is_some() {
-                if let Some(v) = versions.get_mut(k.depth as usize) { *v += 1; }
+                if let Some(v) = versions.get_mut(k.depth as usize) {
+                    *v += 1;
+                }
             }
         }
     }
@@ -1048,12 +1301,20 @@ impl Native {
     fn transfer(&mut self, k: &DhdrCommand, pixels: Option<&[u32]>, shared: &NativeShared) {
         let gpu = self.gpu;
         let kind = match k.kind {
-            DHDR_CMD_COPY => "copy", DHDR_CMD_IMPORT => "import", _ => "alpha-upload",
+            DHDR_CMD_COPY => "copy",
+            DHDR_CMD_IMPORT => "import",
+            _ => "alpha-upload",
         };
         self.pass.end_reason(kind);
         if pass_trace::on() {
-            pass_trace::event(&format!("transfer:{kind} source={} at={},{} to={},{} size={}x{}", k.source, k.sx, k.sy,
-                                       k.x, k.y, k.w, k.h), k.target as i32, -1);
+            pass_trace::event(
+                &format!(
+                    "transfer:{kind} source={} at={},{} to={},{} size={}x{}",
+                    k.source, k.sx, k.sy, k.x, k.y, k.w, k.h
+                ),
+                k.target as i32,
+                -1,
+            );
         }
         let (encoder, drawn) = self.pass.split(gpu);
         let mut kit = Kit::new(gpu, &self.objects, shared, &mut self.arenas, encoder);
@@ -1063,19 +1324,32 @@ impl Native {
     /// native_surface_group: surface `index`'s draw bind group (init.rs's texture layout, the
     /// nearest sampler), made when first asked for; None for a Z surface or one without a texture.
     fn surface_group(&mut self, index: usize, shared: &NativeShared) -> Option<wgpu::BindGroup> {
-        self.surfaces.group(self.gpu, &self.objects.texture_layout, &shared.nearest, index).cloned()
+        self.surfaces
+            .group(
+                self.gpu,
+                &self.objects.texture_layout,
+                &shared.nearest,
+                index,
+            )
+            .cloned()
     }
 
     /// A draw sampling its own target, surface `index` (`Surfaces::sample_target`, which counts
     /// the self-copy): the scratch texture's bind group, or None to skip the draw. Recorded after
     /// the open pass ends.
-    fn sample_target(&mut self, index: usize, c: &DhdrNativeConstants, shared: &NativeShared)
-                     -> Option<wgpu::BindGroup> {
+    fn sample_target(
+        &mut self,
+        index: usize,
+        c: &DhdrNativeConstants,
+        shared: &NativeShared,
+    ) -> Option<wgpu::BindGroup> {
         let gpu = self.gpu;
         self.pass.end_reason("feedback-copy");
         let (encoder, drawn) = self.pass.split(gpu);
         let mut kit = Kit::new(gpu, &self.objects, shared, &mut self.arenas, encoder);
-        self.surfaces.sample_target(&mut kit, index, c, drawn).cloned()
+        self.surfaces
+            .sample_target(&mut kit, index, c, drawn)
+            .cloned()
     }
 
     /// Surface `index`'s texture view (a draw pass's colour or Z attachment, what conversions and
@@ -1114,12 +1388,18 @@ impl Native {
             dummy_depth_view: &shared.dummy_depth_view,
         };
         let encoder = self.pass.encoder(gpu);
-        self.converts.dispatch(gpu, encoder, &self.arenas, &o, ready);
+        self.converts
+            .dispatch(gpu, encoder, &self.arenas, &o, ready);
     }
 
     /// Conversion `i` of the picture made ready to run (convert.rs's `prepare`): its texture, its
     /// constants and its bind groups; nothing is recorded yet. None when it can't run.
-    fn convert_ready(&mut self, p: &Picture, i: usize, shared: &NativeShared) -> Option<crate::native::convert::Ready> {
+    fn convert_ready(
+        &mut self,
+        p: &Picture,
+        i: usize,
+        shared: &NativeShared,
+    ) -> Option<crate::native::convert::Ready> {
         let gpu = self.gpu;
         let v = p.converts.get(i)?;
         let base = p.convert_base(i).map(|t| &t.view);
@@ -1128,7 +1408,9 @@ impl Native {
         for k in 0..4 {
             if v.surface[k] >= 0 {
                 infos[k] = surface(p, v.surface[k]);
-                views[k] = infos[k].filter(|s| has_texture(Some(s))).and_then(|_| self.surface_view(v.surface[k] as usize));
+                views[k] = infos[k]
+                    .filter(|s| has_texture(Some(s)))
+                    .and_then(|_| self.surface_view(v.surface[k] as usize));
             }
         }
         let sources: [Option<ConvertSource>; 4] = std::array::from_fn(|k| {
@@ -1148,7 +1430,8 @@ impl Native {
             dummy_texels_view: &shared.dummy_texels_view,
             dummy_depth_view: &shared.dummy_depth_view,
         };
-        self.converts.prepare(gpu, &mut self.arenas, &o, i, v, base, &sources)
+        self.converts
+            .prepare(gpu, &mut self.arenas, &o, i, v, base, &sources)
     }
 
     /// native_scanout through scanout.rs: the picture's display surface (with a texture) into the
@@ -1163,15 +1446,32 @@ impl Native {
         if p.display_surface < 0 {
             return false;
         }
-        let Some(info) = p.surfaces.get(p.display_surface as usize).filter(|s| has_texture(Some(s))) else {
+        let Some(info) = p
+            .surfaces
+            .get(p.display_surface as usize)
+            .filter(|s| has_texture(Some(s)))
+        else {
             return false;
         };
-        let Some(view) = self.surface_view(p.display_surface as usize) else { return false };
-        let o = ScanoutObjects { pipeline: &self.objects.scanout_pipe,
-            fast_pipeline: &self.objects.scanout_fast_pipe, layout: &self.objects.scanout_layout };
+        let Some(view) = self.surface_view(p.display_surface as usize) else {
+            return false;
+        };
+        let o = ScanoutObjects {
+            pipeline: &self.objects.scanout_pipe,
+            fast_pipeline: &self.objects.scanout_fast_pipe,
+            layout: &self.objects.scanout_layout,
+        };
         let encoder = self.pass.encoder(gpu);
         pass_trace::event("compute-scanout", p.display_surface as i32, -1);
-        self.display.scanout(gpu, encoder, &mut self.arenas, &o, &view, info.scale, &p.display)
+        self.display.scanout(
+            gpu,
+            encoder,
+            &mut self.arenas,
+            &o,
+            &view,
+            info.scale,
+            &p.display,
+        )
     }
 
     /// native_draw_passes: one draw command into the open pass. GS blending wants As / 128 for SA
@@ -1182,15 +1482,32 @@ impl Native {
     /// what the first draw left (in reverse triangle order for GREATER, where a later triangle at
     /// an equal Z lost); without, the same test on the unchanged Z buffer.
     #[allow(clippy::too_many_arguments)]
-    fn draw_passes(&mut self, k: &DhdrCommand, vertices: &[DhdrVertex], indices: Option<&[u32]>, has_depth: bool,
-                   retained_depth: bool, texel_scale: u32, spec: u32, offset: u32, uniforms: &wgpu::BindGroup,
-                   group: &wgpu::BindGroup) {
+    fn draw_passes(
+        &mut self,
+        k: &DhdrCommand,
+        vertices: &[DhdrVertex],
+        indices: Option<&[u32]>,
+        has_depth: bool,
+        retained_depth: bool,
+        texel_scale: u32,
+        spec: u32,
+        offset: u32,
+        uniforms: &wgpu::BindGroup,
+        group: &wgpu::BindGroup,
+    ) {
         let gpu = self.gpu;
         let (blend_key, mask) = without_kept_colour(k.blend_key, k.color_mask as u32);
         let dk = k.depth_key as u32;
         let (src, dst) = (blend_key >> 1 & 31, blend_key >> 6 & 31);
-        let uses_as = blend_key & 1 != 0 && (src == BLEND_SA || src == BLEND_ISA || dst == BLEND_SA || dst == BLEND_ISA);
-        let depth = if has_depth { 16 | if dk & 4 != 0 { 8 } else { 0 } | (dk & 3) } else if retained_depth { 17 } else { 0 };
+        let uses_as = blend_key & 1 != 0
+            && (src == BLEND_SA || src == BLEND_ISA || dst == BLEND_SA || dst == BLEND_ISA);
+        let depth = if has_depth {
+            16 | if dk & 4 != 0 { 8 } else { 0 } | (dk & 3)
+        } else if retained_depth {
+            17
+        } else {
+            0
+        };
         if mask == 0 && depth & 8 == 0 {
             // A blend that keeps the colour, its alpha masked and no Z write: nothing changes.
             return;
@@ -1199,7 +1516,15 @@ impl Native {
         let texel_key = (texel_scale & 15) << TEXEL_SCALE_SHIFT | texel_scale & TEXELS;
         let texel_scale = texel_scale & 15;
         // A translated VU1 mesh (flag 4096): its own vertex stage and culling (pipelines.rs MESH).
-        let mesh = if k.constants.flags & 4096 != 0 { MESH | if k.constants.flags & 8192 != 0 { MESH_TWO_SIDED } else { 0 } } else { 0 };
+        let mesh = if k.constants.flags & 4096 != 0 {
+            MESH | if k.constants.flags & 8192 != 0 {
+                MESH_TWO_SIDED
+            } else {
+                0
+            }
+        } else {
+            0
+        };
         let texel_key = texel_key | mesh;
         let base = blend_key | depth << 18 | texel_key;
         let special = (spec as u64) << SPEC_SHIFT;
@@ -1208,18 +1533,28 @@ impl Native {
         let blends = blend_key & 1 != 0;
         if !uses_as || (self.objects.dual && self.objects.dual_module.is_some()) {
             let variant = if uses_as { VARIANT_DUAL } else { VARIANT_PLAIN };
-            self.pass.class = stats_class(flags, texel_scale, variant, depth, blends, mask & 8 != 0);
-            if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
-                                      (base | mask << 14 | variant << 23) as u64 | special) {
+            self.pass.class =
+                stats_class(flags, texel_scale, variant, depth, blends, mask & 8 != 0);
+            if self.pass.set_pipeline(
+                gpu,
+                &mut self.pipelines,
+                &self.objects,
+                (base | mask << 14 | variant << 23) as u64 | special,
+            ) {
                 self.pass.draw(k.first, k.count);
             }
             return;
         }
         if mask & 7 != 0
-            && self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
-                                      (base | (mask & 7) << 14 | VARIANT_RGB_A128 << 23) as u64 | special)
+            && self.pass.set_pipeline(
+                gpu,
+                &mut self.pipelines,
+                &self.objects,
+                (base | (mask & 7) << 14 | VARIANT_RGB_A128 << 23) as u64 | special,
+            )
         {
-            self.pass.class = stats_class(flags, texel_scale, VARIANT_RGB_A128, depth, blends, false);
+            self.pass.class =
+                stats_class(flags, texel_scale, VARIANT_RGB_A128, depth, blends, false);
             self.pass.draw(k.first, k.count);
         }
         if mask & 8 == 0 {
@@ -1234,21 +1569,35 @@ impl Native {
             if dk & 7 == (4 | 3) && k.count.is_multiple_of(3) && k.count > 3 && in_range {
                 // GREATER with writes
                 first = match indices {
-                    Some(indices) => self.arenas.reverse_triangle_indices(indices, k.first, k.count),
+                    Some(indices) => self
+                        .arenas
+                        .reverse_triangle_indices(indices, k.first, k.count),
                     None => self.arenas.reverse_triangles(vertices, k.first, k.count),
                 };
             }
         }
-        if self.pass.set_pipeline(gpu, &mut self.pipelines, &self.objects,
-                                  (8 << 14 | second << 18 | VARIANT_ALPHA_ONLY << 23 | texel_key) as u64 | special) {
-            self.pass.class = stats_class(flags, texel_scale, VARIANT_ALPHA_ONLY, second, false, true);
+        if self.pass.set_pipeline(
+            gpu,
+            &mut self.pipelines,
+            &self.objects,
+            (8 << 14 | second << 18 | VARIANT_ALPHA_ONLY << 23 | texel_key) as u64 | special,
+        ) {
+            self.pass.class =
+                stats_class(flags, texel_scale, VARIANT_ALPHA_ONLY, second, false, true);
             self.pass.draw(first, k.count);
         }
     }
 }
 
 /// A draw's DHD_GPU_STATS kind (`gpu_stats::class`; 0 in the browser, which has no statistics).
-fn stats_class(flags: u32, texel_scale: u32, variant: u32, depth: u32, blend: bool, alpha: bool) -> u32 {
+fn stats_class(
+    flags: u32,
+    texel_scale: u32,
+    variant: u32,
+    depth: u32,
+    blend: bool,
+    alpha: bool,
+) -> u32 {
     #[cfg(not(target_arch = "wasm32"))]
     return crate::native::gpu_stats::class(flags, texel_scale, variant, depth, blend, alpha);
     #[cfg(target_arch = "wasm32")]
@@ -1280,7 +1629,9 @@ unsafe fn slice<'a, T>(p: *const T, len: usize, export: &'static str) -> &'a [T]
         return &[];
     }
     if p.is_null() {
-        crate::guard::fatal(&format!("dhd_render: {export}: NULL data for {len} elements"));
+        crate::guard::fatal(&format!(
+            "dhd_render: {export}: NULL data for {len} elements"
+        ));
     }
     // SAFETY: the caller's contract.
     unsafe { std::slice::from_raw_parts(p, len) }
@@ -1294,8 +1645,13 @@ unsafe fn slice<'a, T>(p: *const T, len: usize, export: &'static str) -> &'a [T]
 /// # Safety
 /// As `dhdr_native_picture`; `indices` holds `index_count` indices, alive for the call.
 #[no_mangle]
-pub unsafe extern "C" fn dhdr_native_picture_indexed(n: *mut DhdrNative, p: *const DhdrPicture, indices: *const u32,
-                                                     index_count: u32, out: *mut DhdrPictureResult) -> i32 {
+pub unsafe extern "C" fn dhdr_native_picture_indexed(
+    n: *mut DhdrNative,
+    p: *const DhdrPicture,
+    indices: *const u32,
+    index_count: u32,
+    out: *mut DhdrPictureResult,
+) -> i32 {
     const E: &str = "dhdr_native_picture_indexed";
     let _g = crate::guard::Guard::enter(E);
     // SAFETY: p and out are a picture and an output (the header), or NULL (fatal).
@@ -1303,25 +1659,35 @@ pub unsafe extern "C" fn dhdr_native_picture_indexed(n: *mut DhdrNative, p: *con
         crate::guard::fatal(&format!("dhd_render: {E}: NULL picture or result"))
     };
     if p.size as usize != std::mem::size_of::<DhdrPicture>() {
-        crate::host::log(&format!("dhd_render: {E}: DhdrPicture.size {} (this library's is {})", p.size,
-                                  std::mem::size_of::<DhdrPicture>()));
+        crate::host::log(&format!(
+            "dhd_render: {E}: DhdrPicture.size {} (this library's is {})",
+            p.size,
+            std::mem::size_of::<DhdrPicture>()
+        ));
         return 0;
     }
     // SAFETY: native_snapshot.inc fills every array with its count, alive for the call; C keeps
     // `indices` alive for it too.
     let (pic, indices) = unsafe {
-        (Picture {
-            vertices: slice(p.vertices, p.vertex_count as usize, E),
-            commands: slice(p.commands, p.command_count as usize, E),
-            converts: slice(p.converts, p.convert_count as usize, E),
-            surfaces: slice(p.surfaces, p.surface_count as usize, E),
-            display_surface: p.display_surface,
-            display: p.display,
-            movie: (p.movie_on != 0).then(|| {
-                (p.movie_width, p.movie_height, slice(p.movie, p.movie_width as usize * p.movie_height as usize, E))
-            }),
-            scale: p.scale,
-        }, slice(indices, index_count as usize, E))
+        (
+            Picture {
+                vertices: slice(p.vertices, p.vertex_count as usize, E),
+                commands: slice(p.commands, p.command_count as usize, E),
+                converts: slice(p.converts, p.convert_count as usize, E),
+                surfaces: slice(p.surfaces, p.surface_count as usize, E),
+                display_surface: p.display_surface,
+                display: p.display,
+                movie: (p.movie_on != 0).then(|| {
+                    (
+                        p.movie_width,
+                        p.movie_height,
+                        slice(p.movie, p.movie_width as usize * p.movie_height as usize, E),
+                    )
+                }),
+                scale: p.scale,
+            },
+            slice(indices, index_count as usize, E),
+        )
     };
     // SAFETY: n is a live DhdrNative (`ffi.rs`: an `Owned<Native>` behind the handle), or NULL.
     let Some(owned) = (unsafe { (n as *const crate::guard::Owned<Native>).as_ref() }) else {
@@ -1370,8 +1736,8 @@ pub mod rstat {
     pub const PREPOLL: usize = 16;
     const PARTS: usize = 17;
     const NAMES: [&str; PARTS] = [
-        "picture", "reserve", "surfaces", "record", "write", "scanout", "submit", "present", "acquire",
-        "precord", "psubmit", "zstart", "ztake", "awrite", "finish", "qsub", "prepoll",
+        "picture", "reserve", "surfaces", "record", "write", "scanout", "submit", "present",
+        "acquire", "precord", "psubmit", "zstart", "ztake", "awrite", "finish", "qsub", "prepoll",
     ];
     /// Pictures per log line (about two seconds at 120 field/s).
     pub const EVERY: u32 = 240;
@@ -1387,7 +1753,9 @@ pub mod rstat {
     pub const VERTICES: usize = 6;
     pub const INDICES: usize = 7;
     const TALLIES: usize = 8;
-    const TALLY_NAMES: [&str; TALLIES] = ["draws", "copies", "bind0", "bind1", "pipes", "commands", "vertices", "indices"];
+    const TALLY_NAMES: [&str; TALLIES] = [
+        "draws", "copies", "bind0", "bind1", "pipes", "commands", "vertices", "indices",
+    ];
 
     thread_local! {
         static ON: Cell<u8> = const { Cell::new(0) };
@@ -1494,14 +1862,20 @@ pub mod pass_trace {
         static PICTURE: Cell<u32> = const { Cell::new(0) };
     }
     /// Whether DHD_PASS_TRACE is set (a caller builds a line's text only then).
-    pub fn on() -> bool { ON.with(|v| *v) }
+    pub fn on() -> bool {
+        ON.with(|v| *v)
+    }
     pub fn event(reason: &str, target: i32, depth: i32) {
         if on() {
             let n = PICTURE.with(Cell::get);
             if n % 240 == 0 {
-                crate::host::log(&format!("pass-trace: picture={n} {reason} target={target} depth={depth}"));
+                crate::host::log(&format!(
+                    "pass-trace: picture={n} {reason} target={target} depth={depth}"
+                ));
             }
         }
     }
-    pub fn picture() { PICTURE.with(|v| v.set(v.get().wrapping_add(1))); }
+    pub fn picture() {
+        PICTURE.with(|v| v.set(v.get().wrapping_add(1)));
+    }
 }

@@ -102,7 +102,11 @@ mod imp {
         let canvas = if canvas.is_undefined() || canvas.is_null() {
             None
         } else {
-            Some(canvas.dyn_into::<web_sys::OffscreenCanvas>().map_err(|_| "the canvas is not an OffscreenCanvas")?)
+            Some(
+                canvas
+                    .dyn_into::<web_sys::OffscreenCanvas>()
+                    .map_err(|_| "the canvas is not an OffscreenCanvas")?,
+            )
         };
 
         // ---- adapter and device, as the retired gpu.js made them
@@ -110,8 +114,11 @@ mod imp {
         desc.backends = wgpu::Backends::BROWSER_WEBGPU;
         let instance = wgpu::Instance::new(desc);
         let surface = match canvas {
-            Some(c) => Some(instance.create_surface(wgpu::SurfaceTarget::OffscreenCanvas(c))
-                .map_err(|e| format!("create_surface: {e}"))?),
+            Some(c) => Some(
+                instance
+                    .create_surface(wgpu::SurfaceTarget::OffscreenCanvas(c))
+                    .map_err(|e| format!("create_surface: {e}"))?,
+            ),
             None => None,
         };
         let adapter = instance
@@ -140,15 +147,24 @@ mod imp {
             .map_err(|e| format!("request_device: {e}"))?;
         crate::guard::install_error_handler(&device);
         device.set_device_lost_callback(|reason, message| {
-            crate::host::log(&format!("dhd_render: WebGPU device lost ({reason:?}): {message}"));
+            crate::host::log(&format!(
+                "dhd_render: WebGPU device lost ({reason:?}): {message}"
+            ));
             crate::web::wait::set_lost();
         });
         let t_device = now();
 
         // ---- the Gpu: present.wgsl's pipeline is the RENDER_PIPELINES probe
         let info = adapter.get_info();
-        let label = if info.name.is_empty() { "WebGPU".to_owned() } else { info.name.clone() };
-        let options = DeviceOptions { log_level, ..DeviceOptions::default() };
+        let label = if info.name.is_empty() {
+            "WebGPU".to_owned()
+        } else {
+            info.name.clone()
+        };
+        let options = DeviceOptions {
+            log_level,
+            ..DeviceOptions::default()
+        };
         let mut gpu = Gpu::from_parts(instance, adapter, device, queue, options, false);
         let pipe = PresentPipe::create_async(&gpu).await;
         if pipe.is_some() {

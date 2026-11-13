@@ -46,7 +46,9 @@ impl SkeletonDisplay for Display {}
 trait SkeletonExact {
     fn display_upload(&mut self, pixels: &[u32], width: u32, height: u32) -> Result<(), String> {
         let _ = pixels;
-        Err(format!("no display texture for a {width} x {height} frame (exact/display.rs not merged)"))
+        Err(format!(
+            "no display texture for a {width} x {height} frame (exact/display.rs not merged)"
+        ))
     }
 }
 
@@ -85,7 +87,9 @@ pub struct Surface {
 /// `pixels` as bytes (RGBA8, little-endian words).
 fn bytes_of(pixels: &[u32]) -> &[u8] {
     // SAFETY: u32 has no padding and every byte pattern is a valid u8; the length is exact.
-    unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *const u8, std::mem::size_of_val(pixels)) }
+    unsafe {
+        std::slice::from_raw_parts(pixels.as_ptr() as *const u8, std::mem::size_of_val(pixels))
+    }
 }
 
 /// Writes w x h `pixels` into `texture` (queue write: lands before the next submit).
@@ -98,8 +102,16 @@ fn write_pixels(gpu: &Gpu, texture: &wgpu::Texture, pixels: &[u32], w: u32, h: u
             aspect: wgpu::TextureAspect::All,
         },
         bytes_of(&pixels[..w as usize * h as usize]),
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: Some(h) },
-        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(w * 4),
+            rows_per_image: Some(h),
+        },
+        wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
     );
 }
 
@@ -119,13 +131,19 @@ const PLATFORM_KINDS: &[u32] = &[];
 /// draws (and of the browser's canvas), else BGRA8Unorm (the same bytes, swizzled by the present
 /// pass's target: Apple's CAMetalLayer, some Vulkan drivers). None when it has neither.
 pub fn surface_format(formats: &[wgpu::TextureFormat]) -> Option<wgpu::TextureFormat> {
-    [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm].into_iter().find(|f| formats.contains(f))
+    [
+        wgpu::TextureFormat::Rgba8Unorm,
+        wgpu::TextureFormat::Bgra8Unorm,
+    ]
+    .into_iter()
+    .find(|f| formats.contains(f))
 }
 
 /// A non-null handle of `what`.
 #[cfg(not(target_arch = "wasm32"))]
 fn handle(value: u64, what: &str) -> Result<std::ptr::NonNull<std::ffi::c_void>, String> {
-    std::ptr::NonNull::new(value as usize as *mut std::ffi::c_void).ok_or_else(|| format!("NULL {what}"))
+    std::ptr::NonNull::new(value as usize as *mut std::ffi::c_void)
+        .ok_or_else(|| format!("NULL {what}"))
 }
 
 /// The last surface's present mode for `dhdr_perf_read` (finding 129): 0 none yet, 1 immediate,
@@ -141,14 +159,19 @@ impl Surface {
     }
 
     /// `dhdr_surface_create`: a surface on the window, then present.wgsl's pipeline into its format.
-    pub fn create(gpu: &'static Gpu, window: &DhdrWindow, present_flags: u32) -> Result<Surface, String> {
+    pub fn create(
+        gpu: &'static Gpu,
+        window: &DhdrWindow,
+        present_flags: u32,
+    ) -> Result<Surface, String> {
         if !Self::supports(window.kind) {
             return Err(format!("window kind {} is not supported", window.kind));
         }
         let surface = Self::window(gpu, window)?;
         let formats = surface.get_capabilities(&gpu.adapter).formats;
-        let format = surface_format(&formats)
-            .ok_or_else(|| format!("the surface has neither rgba8unorm nor bgra8unorm (formats {formats:?})"))?;
+        let format = surface_format(&formats).ok_or_else(|| {
+            format!("the surface has neither rgba8unorm nor bgra8unorm (formats {formats:?})")
+        })?;
         let pipe = PresentPipe::create(gpu, format).ok_or("no present pipeline")?;
         Self::from_wgpu(gpu, surface, present_flags, pipe)
     }
@@ -163,35 +186,66 @@ impl Surface {
             // a = the CAMetalLayer of SDL's Metal view (SDL_Metal_GetLayer); wgpu has the variant where
             // its Metal backend is built
             #[cfg(target_vendor = "apple")]
-            DHDR_WINDOW_METAL_LAYER => wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(handle(window.a, "CAMetalLayer")?.as_ptr()),
+            DHDR_WINDOW_METAL_LAYER => wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(
+                handle(window.a, "CAMetalLayer")?.as_ptr(),
+            ),
             kind => {
                 let (display, window) = match kind {
                     DHDR_WINDOW_WIN32 => {
-                        let hwnd = std::num::NonZeroIsize::new(window.a as isize).ok_or("NULL HWND")?;
+                        let hwnd =
+                            std::num::NonZeroIsize::new(window.a as isize).ok_or("NULL HWND")?;
                         let mut w = raw_window_handle::Win32WindowHandle::new(hwnd);
                         w.hinstance = std::num::NonZeroIsize::new(window.b as isize);
-                        (D::Windows(raw_window_handle::WindowsDisplayHandle::new()), W::Win32(w))
+                        (
+                            D::Windows(raw_window_handle::WindowsDisplayHandle::new()),
+                            W::Win32(w),
+                        )
                     }
                     // a = the ANativeWindow (SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER), on Vulkan
                     // (finding 091); the Vulkan surface holds its own reference to it
-                    DHDR_WINDOW_ANDROID => (D::Android(raw_window_handle::AndroidDisplayHandle::new()),
-                                            W::AndroidNdk(raw_window_handle::AndroidNdkWindowHandle::new(handle(window.a, "ANativeWindow")?))),
+                    DHDR_WINDOW_ANDROID => (
+                        D::Android(raw_window_handle::AndroidDisplayHandle::new()),
+                        W::AndroidNdk(raw_window_handle::AndroidNdkWindowHandle::new(handle(
+                            window.a,
+                            "ANativeWindow",
+                        )?)),
+                    ),
                     // a = the X11 Display, b = the Window (SDL_PROP_WINDOW_X11_*)
                     DHDR_WINDOW_XLIB => {
-                        let id = std::ffi::c_ulong::try_from(window.b).ok().filter(|&id| id != 0).ok_or("no X11 window")?;
-                        (D::Xlib(raw_window_handle::XlibDisplayHandle::new(Some(handle(window.a, "X11 Display")?), 0)),
-                         W::Xlib(raw_window_handle::XlibWindowHandle::new(id)))
+                        let id = std::ffi::c_ulong::try_from(window.b)
+                            .ok()
+                            .filter(|&id| id != 0)
+                            .ok_or("no X11 window")?;
+                        (
+                            D::Xlib(raw_window_handle::XlibDisplayHandle::new(
+                                Some(handle(window.a, "X11 Display")?),
+                                0,
+                            )),
+                            W::Xlib(raw_window_handle::XlibWindowHandle::new(id)),
+                        )
                     }
                     // a = the wl_display, b = the wl_surface (SDL_PROP_WINDOW_WAYLAND_*)
-                    DHDR_WINDOW_WAYLAND => (D::Wayland(raw_window_handle::WaylandDisplayHandle::new(handle(window.a, "wl_display")?)),
-                                            W::Wayland(raw_window_handle::WaylandWindowHandle::new(handle(window.b, "wl_surface")?))),
+                    DHDR_WINDOW_WAYLAND => (
+                        D::Wayland(raw_window_handle::WaylandDisplayHandle::new(handle(
+                            window.a,
+                            "wl_display",
+                        )?)),
+                        W::Wayland(raw_window_handle::WaylandWindowHandle::new(handle(
+                            window.b,
+                            "wl_surface",
+                        )?)),
+                    ),
                     kind => return Err(format!("window kind {kind} is not supported")),
                 };
-                wgpu::SurfaceTargetUnsafe::RawHandle { raw_display_handle: Some(display), raw_window_handle: window }
+                wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: Some(display),
+                    raw_window_handle: window,
+                }
             }
         };
         // SAFETY: the window outlives the surface (above).
-        unsafe { gpu.instance.create_surface_unsafe(target) }.map_err(|e| format!("create_surface: {e}"))
+        unsafe { gpu.instance.create_surface_unsafe(target) }
+            .map_err(|e| format!("create_surface: {e}"))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -203,42 +257,78 @@ impl Surface {
     /// A surface over `surface` (the window's, or B1's OffscreenCanvas) in `pipe`'s format: checks
     /// the capabilities and picks the present mode, alpha mode and usage. Configured on the first
     /// acquire.
-    pub fn from_wgpu(gpu: &'static Gpu, surface: wgpu::Surface<'static>, present_flags: u32, pipe: PresentPipe)
-                     -> Result<Surface, String> {
+    pub fn from_wgpu(
+        gpu: &'static Gpu,
+        surface: wgpu::Surface<'static>,
+        present_flags: u32,
+        pipe: PresentPipe,
+    ) -> Result<Surface, String> {
         let caps = surface.get_capabilities(&gpu.adapter);
         let format = pipe.format;
         if !caps.formats.contains(&format) {
-            return Err(format!("the surface has no {format:?} (formats {:?})", caps.formats));
+            return Err(format!(
+                "the surface has no {format:?} (formats {:?})",
+                caps.formats
+            ));
         }
         let offers = |m: wgpu::PresentMode| caps.present_modes.contains(&m);
         let present_mode = if present_flags & DHDR_PRESENT_VSYNC != 0 {
             wgpu::PresentMode::Fifo
-        } else if present_flags & DHDR_PRESENT_NO_TEARING == 0 && offers(wgpu::PresentMode::Immediate) {
+        } else if present_flags & DHDR_PRESENT_NO_TEARING == 0
+            && offers(wgpu::PresentMode::Immediate)
+        {
             wgpu::PresentMode::Immediate
         } else if offers(wgpu::PresentMode::Mailbox) {
             wgpu::PresentMode::Mailbox
         } else {
             wgpu::PresentMode::Fifo
         };
-        PRESENT_MODE.store(match present_mode {
-            wgpu::PresentMode::Immediate => 1,
-            wgpu::PresentMode::Mailbox => 2,
-            wgpu::PresentMode::Fifo => 3,
-            wgpu::PresentMode::FifoRelaxed => 4,
-            _ => 0,
-        }, std::sync::atomic::Ordering::Relaxed);
-        crate::host::log(&format!("gs: present mode {present_mode:?} (V-Sync {}; the surface offers {:?})",
-                                  if present_flags & (DHDR_PRESENT_VSYNC | DHDR_PRESENT_NO_TEARING) != 0 { "on" } else { "off" },
-                                  caps.present_modes));
-        let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque) || caps.alpha_modes.is_empty() {
+        PRESENT_MODE.store(
+            match present_mode {
+                wgpu::PresentMode::Immediate => 1,
+                wgpu::PresentMode::Mailbox => 2,
+                wgpu::PresentMode::Fifo => 3,
+                wgpu::PresentMode::FifoRelaxed => 4,
+                _ => 0,
+            },
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        crate::host::log(&format!(
+            "gs: present mode {present_mode:?} (V-Sync {}; the surface offers {:?})",
+            if present_flags & (DHDR_PRESENT_VSYNC | DHDR_PRESENT_NO_TEARING) != 0 {
+                "on"
+            } else {
+                "off"
+            },
+            caps.present_modes
+        ));
+        let alpha_mode = if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::Opaque)
+            || caps.alpha_modes.is_empty()
+        {
             wgpu::CompositeAlphaMode::Opaque
         } else {
             caps.alpha_modes[0]
         };
         // COPY_SRC lets the test hook read the presented texture back; not needed otherwise.
-        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
-        Ok(Surface { gpu, frame: None, surface, usage, present_mode, alpha_mode, format, width: 0, height: 0, pipe, own: None, counter: super::counter::Counter::default(), touch: super::touch::TouchOverlay::default(),
-            #[cfg(feature = "native")] capture: super::counter::Capture::default() })
+        let usage =
+            wgpu::TextureUsages::RENDER_ATTACHMENT | (caps.usages & wgpu::TextureUsages::COPY_SRC);
+        Ok(Surface {
+            gpu,
+            frame: None,
+            surface,
+            usage,
+            present_mode,
+            alpha_mode,
+            format,
+            width: 0,
+            height: 0,
+            pipe,
+            own: None,
+            counter: super::counter::Counter::default(),
+            touch: super::touch::TouchOverlay::default(),
+            #[cfg(feature = "native")]
+            capture: super::counter::Capture::default(),
+        })
     }
 
     /// `DHDR_SURFACE_COPY_SRC` when the frames can be copied from.
@@ -264,16 +354,19 @@ impl Surface {
     fn configure(&mut self, width: u32, height: u32) {
         let max = self.gpu.device.limits().max_texture_dimension_2d;
         let (width, height) = (width.min(max), height.min(max));
-        self.surface.configure(&self.gpu.device, &wgpu::SurfaceConfiguration {
-            usage: self.usage,
-            format: self.format,
-            width,
-            height,
-            present_mode: self.present_mode,
-            desired_maximum_frame_latency: frame_latency(self.present_mode),
-            alpha_mode: self.alpha_mode,
-            view_formats: vec![],
-        });
+        self.surface.configure(
+            &self.gpu.device,
+            &wgpu::SurfaceConfiguration {
+                usage: self.usage,
+                format: self.format,
+                width,
+                height,
+                present_mode: self.present_mode,
+                desired_maximum_frame_latency: frame_latency(self.present_mode),
+                alpha_mode: self.alpha_mode,
+                view_formats: vec![],
+            },
+        );
         self.width = width;
         self.height = height;
     }
@@ -281,7 +374,12 @@ impl Surface {
     /// Configures to window_w x window_h (when that changed, or `reconfigure`), then acquires the
     /// frame: Ok(Some(view)) acquired and kept until `present`; Ok(None) skipped (0 x 0, Timeout,
     /// Occluded); Err failed. The native present pass (native/present.rs) draws through this too.
-    pub fn acquire(&mut self, window_w: u32, window_h: u32, reconfigure: bool) -> Result<Option<wgpu::TextureView>, String> {
+    pub fn acquire(
+        &mut self,
+        window_w: u32,
+        window_h: u32,
+        reconfigure: bool,
+    ) -> Result<Option<wgpu::TextureView>, String> {
         self.frame = None; // a frame drawn but never presented is dropped
         if crate::lost::lost() {
             // every call is a no-op on a lost device; C asks dhdr_device_lost and ends the game
@@ -296,7 +394,10 @@ impl Surface {
         // side recreates the surface when the app comes back (gs_gpu_surface_reset).
         #[cfg(target_os = "android")]
         {
-            let scope = self.gpu.device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let scope = self
+                .gpu
+                .device
+                .push_error_scope(wgpu::ErrorFilter::Validation);
             let acquired = self.acquire_unscoped(window_w, window_h, reconfigure);
             if let Some(e) = pollster::block_on(scope.pop()) {
                 self.frame = None;
@@ -308,26 +409,42 @@ impl Surface {
         self.acquire_unscoped(window_w, window_h, reconfigure)
     }
 
-    fn acquire_unscoped(&mut self, window_w: u32, window_h: u32, reconfigure: bool) -> Result<Option<wgpu::TextureView>, String> {
+    fn acquire_unscoped(
+        &mut self,
+        window_w: u32,
+        window_h: u32,
+        reconfigure: bool,
+    ) -> Result<Option<wgpu::TextureView>, String> {
         let max = self.gpu.device.limits().max_texture_dimension_2d;
         if reconfigure || (window_w.min(max), window_h.min(max)) != (self.width, self.height) {
             self.configure(window_w, window_h);
         }
         for attempt in 0..2 {
             match self.surface.get_current_texture() {
-                wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                    let view = t.texture.create_view(&wgpu::TextureViewDescriptor::default());
+                wgpu::CurrentSurfaceTexture::Success(t)
+                | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
+                    let view = t
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default());
                     self.frame = Some(t);
                     crate::lost::frame_acquired(self.gpu); // DHD_TEST_DEVICE_LOST
                     return Ok(Some(view));
                 }
-                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return Ok(None),
-                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost if attempt == 0 => {
+                wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                    return Ok(None)
+                }
+                wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost
+                    if attempt == 0 =>
+                {
                     self.configure(window_w, window_h);
                 }
-                wgpu::CurrentSurfaceTexture::Outdated => return Err("the surface stayed outdated after reconfiguring".into()),
+                wgpu::CurrentSurfaceTexture::Outdated => {
+                    return Err("the surface stayed outdated after reconfiguring".into())
+                }
                 wgpu::CurrentSurfaceTexture::Lost => return Err("the surface was lost".into()),
-                wgpu::CurrentSurfaceTexture::Validation => return Err("get_current_texture: validation error".into()),
+                wgpu::CurrentSurfaceTexture::Validation => {
+                    return Err("get_current_texture: validation error".into())
+                }
             }
         }
         unreachable!("the second attempt always returns")
@@ -340,10 +457,18 @@ impl Surface {
 
     /// The surface-owned picture texture at w x h (pixels presented without an exact renderer).
     fn own_texture(&mut self, w: u32, h: u32) -> &Own {
-        if self.own.as_ref().is_none_or(|o| (o.width, o.height) != (w, h)) {
+        if self
+            .own
+            .as_ref()
+            .is_none_or(|o| (o.width, o.height) != (w, h))
+        {
             let texture = self.gpu.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("present pixels"),
-                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -352,7 +477,12 @@ impl Surface {
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            self.own = Some(Own { texture, view, width: w, height: h });
+            self.own = Some(Own {
+                texture,
+                view,
+                width: w,
+                height: h,
+            });
         }
         self.own.as_ref().expect("own texture")
     }
@@ -362,8 +492,15 @@ impl Surface {
     /// by `ffi.rs`) go into the exact display texture, as scanout would, so a later capture returns
     /// them, even when the window is minimised; without an exact renderer they go into a texture
     /// of the surface's own. No display texture yet (no scanout, no pixels) skips.
-    pub fn present_exact(&mut self, exact: Option<&mut Exact>, pixels: Option<&[u32]>, w: u32, h: u32,
-                         window_w: u32, window_h: u32) -> i32 {
+    pub fn present_exact(
+        &mut self,
+        exact: Option<&mut Exact>,
+        pixels: Option<&[u32]>,
+        w: u32,
+        h: u32,
+        window_w: u32,
+        window_h: u32,
+    ) -> i32 {
         let gpu = self.gpu;
         let log = |e: &str| crate::host::log(&format!("dhd_render: present: {e}"));
         // The picture: (view, width, height).
@@ -378,7 +515,9 @@ impl Surface {
                         return 0;
                     }
                 }
-                let Some(view) = e.display.view() else { return 0 };
+                let Some(view) = e.display.view() else {
+                    return 0;
+                };
                 let (dw, dh) = e.display.size();
                 (view.clone(), dw, dh)
             }
@@ -399,8 +538,18 @@ impl Surface {
                 return -1;
             }
         };
-        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("present") });
-        self.pipe.draw(gpu, &mut encoder, &source.0, &target, [source.1, source.2, self.width, self.height]);
+        let mut encoder = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("present"),
+            });
+        self.pipe.draw(
+            gpu,
+            &mut encoder,
+            &source.0,
+            &target,
+            [source.1, source.2, self.width, self.height],
+        );
         gpu.queue.submit([encoder.finish()]);
         1
     }
@@ -408,11 +557,17 @@ impl Surface {
     /// The host overlays over the picture: the touch controls, then the performance counter.
     pub fn draw_overlays(&mut self) {
         if let Some(frame) = self.frame.as_ref() {
-            let target = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
-            self.touch.draw(self.gpu, &target, self.format, self.width, self.height);
-            self.counter.draw(self.gpu, &target, self.format, self.width, self.height);
+            let target = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            self.touch
+                .draw(self.gpu, &target, self.format, self.width, self.height);
+            self.counter
+                .draw(self.gpu, &target, self.format, self.width, self.height);
             #[cfg(feature = "native")]
-            if self.usage.contains(wgpu::TextureUsages::COPY_SRC) { self.capture.frame(self.gpu, &frame.texture); }
+            if self.usage.contains(wgpu::TextureUsages::COPY_SRC) {
+                self.capture.frame(self.gpu, &frame.texture);
+            }
         }
     }
 
@@ -436,7 +591,14 @@ impl Surface {
 fn frame_latency(mode: wgpu::PresentMode) -> u32 {
     static LATENCY: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
     let set = *LATENCY.get_or_init(|| {
-        std::env::var("DHD_FRAME_LATENCY").ok().and_then(|s| s.trim().parse::<u32>().ok()).map(|n| n.clamp(1, 3))
+        std::env::var("DHD_FRAME_LATENCY")
+            .ok()
+            .and_then(|s| s.trim().parse::<u32>().ok())
+            .map(|n| n.clamp(1, 3))
     });
-    set.unwrap_or(if mode == wgpu::PresentMode::Immediate { 1 } else { 2 })
+    set.unwrap_or(if mode == wgpu::PresentMode::Immediate {
+        1
+    } else {
+        2
+    })
 }

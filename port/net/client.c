@@ -113,6 +113,31 @@ void client_set_install_id(NetClient *c, const char *id)
         memcpy(c->install_id, id, 33);
 }
 
+int client_set_lan_pin(NetClient *c, const char *pin)
+{
+    size_t n = pin ? strlen(pin) : 0;
+    if (n && (n < 4 || n > 8 || strspn(pin, "0123456789") != n)) return 0;
+    SDL_LockMutex(c->lock);
+    if (n) memcpy(c->lan_pin, pin, n);
+    c->lan_pin[n] = 0;
+    SDL_UnlockMutex(c->lock);
+    return 1;
+}
+
+int client_set_room_pin(NetClient *c, const char *pin)
+{
+    size_t n = pin ? strlen(pin) : 0;
+    if (n && (n < 4 || n > 8 || strspn(pin, "0123456789") != n)) return 0;
+    SDL_LockMutex(c->lock);
+    if (!c->connected || !c->lobby.is_lan || !c->lobby.is_host || c->lobby.state != NET_LOBBY || c->lobby.started) {
+        SDL_UnlockMutex(c->lock);
+        return 0;
+    }
+    say(c, "{\"type\":\"pin\",\"pin\":\"%.*s\"}", (int)n, pin ? pin : "");
+    SDL_UnlockMutex(c->lock);
+    return 1;
+}
+
 void client_free(NetClient *c)
 {
     SDL_DestroyCondition(c->changed);
@@ -121,18 +146,25 @@ void client_free(NetClient *c)
 
 void client_connected(NetClient *c, const NetTransport *tr)
 {
-    char name[200], token[96] = "", install[64] = "";
+    char name[200], token[128] = "", install[64] = "", pin[32] = "";
     SDL_LockMutex(c->lock);
     c->tr = *tr;
     c->connected = 1;
     c->last_rx = c->next_ping = net_now_ms();
     json_escape(name, sizeof name, c->name);
     /* a rejoin: the room's token takes our member back, host rights included (finding 137) */
-    if (c->rejoin_token[0])
-        snprintf(token, sizeof token, ",\"rejoinToken\":\"%s\"", c->rejoin_token);
+    if (c->rejoin_token[0]) {
+        if (c->lobby.is_lan)
+            snprintf(token, sizeof token, ",\"memberId\":%d,\"rejoinToken\":\"%s\"", c->lobby.member_id, c->rejoin_token);
+        else
+            snprintf(token, sizeof token, ",\"rejoinToken\":\"%s\"", c->rejoin_token);
+    }
     /* installId: this copy of the game, for the server's bans (finding 161); no other player gets it */
     if (c->install_id[0])
         snprintf(install, sizeof install, ",\"installId\":\"%s\"", c->install_id);
+    /* A PIN is only for a new LAN admission; rejoin tokens resume the existing member directly. */
+    if (c->lobby.is_lan && !c->rejoin_token[0] && c->lan_pin[0])
+        snprintf(pin, sizeof pin, ",\"pin\":\"%s\"", c->lan_pin);
     /* back in a race (finding 175): which one, so the room sends the start again if not this one */
     if (c->rejoin_token[0] && c->race_at > 0 && (c->racing || c->gave_up))
         snprintf(token + strlen(token), sizeof token - strlen(token), ",\"raceStartAt\":%.0f", c->race_at);
@@ -143,8 +175,8 @@ void client_connected(NetClient *c, const NetTransport *tr)
        and "session" asked servers before finding 185 for the race room rules, which every room has
        now; still sent while such a server runs. */
     say(c, "{\"type\":\"hello\",\"protocol\":%d,\"version\":\"%s\",\"clientVersion\":\"%s\",\"isoSha256\":\"%s\","
-        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\",\"race_go\",\"p2p\"]%s%s}", NET_PROTOCOL, c->version,
-        DHD_VERSION, c->iso, name, install, token);
+        "\"name\":\"%s\",\"features\":[\"countdown\",\"session\",\"race_rejoin\",\"race_go\",\"p2p\"]%s%s%s}", NET_PROTOCOL, c->version,
+        DHD_VERSION, c->iso, name, install, token, pin);
     if (!c->racing && c->lobby.state != NET_RECONNECTING)
         c->lobby.state = NET_CONNECTING;
     changed(c);
@@ -169,7 +201,18 @@ static void read_room(NetClient *c, const char *t)
         l->track = (int)v;
     if (json_int(t, "settings.laps", &v))
         l->laps = (int)v;
+    l->lan_room_id[0] = 0;
+    json_string(t, "roomId", l->lan_room_id, sizeof l->lan_room_id);
+    l->pin_required = 0;
+    json_bool(t, "pinRequired", &l->pin_required);
     l->seed = json_int(t, "settings.seed", &v) ? v : -1;
+    l->check_id = json_int(t, "checkId", &v) && v > 0 ? (uint64_t)v : 0;
+    l->check_valid = 0;
+    json_bool(t, "checkValid", &l->check_valid);
+    {
+        double deadline;
+        l->check_deadline = json_number(t, "checkDeadline", &deadline) ? deadline : 0;
+    }
     {
         double ends;
         c->countdown_ends = json_number(t, "countdownEndsAt", &ends) ? ends : 0;
@@ -235,12 +278,25 @@ static void read_room(NetClient *c, const char *t)
             m->bike = (int)v;
         if (json_int(t, FIELD("rttMs"), &v))
             m->rtt_ms = (int)v;
+        {
+            char state[20] = "";
+            json_string(t, FIELD("connectionState"), state, sizeof state);
+            m->connection_state = !strcmp(state, "reconnecting") ? 1 : 0;
+        }
+        m->reconnect_ms = json_int(t, FIELD("reconnectMs"), &v) && v > 0 ? (int)v : 0;
         json_bool(t, FIELD("choosing"), &m->choosing);
         json_bool(t, FIELD("inRace"), &m->in_race);
         json_string(t, FIELD("raceState"), m->race_state, sizeof m->race_state);
         json_string(t, FIELD("dnfReason"), m->dnf_reason, sizeof m->dnf_reason);
         m->finish_ticks = json_int(t, FIELD("finishTicks"), &v) ? v : -1;
         m->place = json_int(t, FIELD("place"), &v) ? (int)v : 0;
+        m->check_id = json_int(t, FIELD("checkId"), &v) && v > 0 ? (uint64_t)v : 0;
+        {
+            char state[16] = "";
+            json_string(t, FIELD("checkState"), state, sizeof state);
+            m->check_state = !strcmp(state, "pending") ? 1 : !strcmp(state, "ok") ? 2 :
+                             !strcmp(state, "timeout") ? 3 : 0;
+        }
         for (int k = 0; k < c->where_count; k++)
             if (c->where_id[k] == m->id) memcpy(m->region, c->where_region[k], sizeof m->region);
         if (m->id == l->member_id) c->ready = m->ready;
@@ -514,6 +570,10 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         if (clock_sample(c, rtt, now) && json_number(text, "serverTime", &server_time))
             c->clock_offset = server_time - (t + rtt / 2), c->have_offset = c->clock_known = 1;
         changed(c);
+    } else if (!strcmp(type, "check") && json_int(text, "checkId", &v) && v > 0 &&
+               c->lobby.is_lan && c->connected) {
+        /* A probe round-trip through this room's WebSocket relay, not the online/P2P path. */
+        say(c, "{\"type\":\"check_response\",\"checkId\":%lld,\"ok\":true}", v);
     } else if (!strcmp(type, "welcome")) {
         NetLobby *l = &c->lobby;
         int located;
@@ -527,7 +587,12 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             char transport[8] = "";
             json_string(text, "transport", transport, sizeof transport);
             c->lobby.is_p2p = !strcmp(transport, "p2p");
+            c->lobby.is_lan = !strcmp(transport, "lan");
         }
+        c->lobby.lan_room_id[0] = 0;
+        json_string(text, "roomId", c->lobby.lan_room_id, sizeof c->lobby.lan_room_id);
+        c->lobby.pin_required = 0;
+        json_bool(text, "pinRequired", &c->lobby.pin_required);
         {   /* kept for a rejoin's hello; only hex goes back into JSON */
             char token[sizeof c->rejoin_token] = "";
             if (json_string(text, "rejoinToken", token, sizeof token) && token[0] &&
@@ -537,7 +602,7 @@ void client_on_text(NetClient *c, const char *text, size_t n)
         if (json_number(text, "serverTime", &server_time) && !c->have_offset)
             c->clock_offset = server_time - net_now_ms(), c->clock_known = 1;
         c->lobby.error_code[0] = c->lobby.error[0] = c->lobby.notice[0] = 0;
-        c->rejoining = 0, c->rejoin_tries = 0;
+        c->rejoining = 0, c->rejoin_tries = 0, c->reconnect_deadline_ms = 0, c->lan_pin[0] = 0;
         /* what the server takes beyond the protocol (finding 187; an older server lists nothing) */
         c->server_race_go = 0;
         for (int k = 0, count = json_count(text, "features"); k < count; k++) {
@@ -581,7 +646,9 @@ void client_on_text(NetClient *c, const char *text, size_t n)
             if (!c->joined_at) c->joined_at = now;
             c->window_n = c->window_count = 0, c->window_worst = 0, c->window_start = now;
             c->next_log = now + NET_LOG_MS;
-            if (!located)
+            if (l->is_lan)
+                snprintf(line + n, sizeof line - n, "this PC joined a local LAN room");
+            else if (!located)
                 snprintf(line + n, sizeof line - n, "the server sent no locations (an older server)");
             else {
                 char room[80];
@@ -765,6 +832,8 @@ int client_on_closed(NetClient *c, int code, const char *reason)
     if (!c->lobby.error[0] && c->lobby.state == NET_FAILED)
         snprintf(c->lobby.error, sizeof c->lobby.error, "connection closed (%d%s%s)", code,
                  reason && *reason ? ": " : "", reason ? reason : "");
+    if (rejoin && c->lobby.is_lan && c->reconnect_deadline_ms <= 0)
+        c->reconnect_deadline_ms = net_now_ms() + 60000.0;
     if (c->joined_at && !c->leaving) {  /* a drop: the last window, and whether it comes back */
         int n = snprintf(line, sizeof line, "net: room %s: connection closed (%d)%s; ", net_log_code(c->lobby.code).text, code,
                          !rejoin ? "" : c->racing ? ", rejoining (the race goes on)" : ", rejoining");
@@ -790,6 +859,7 @@ void client_rejoin_failed(NetClient *c)
         if (c->racing) c->lobby.offline = 1;
         c->rejoining = 0;
         c->lobby.state = NET_FAILED;
+        c->reconnect_deadline_ms = 0;
         if (!c->lobby.error[0]) snprintf(c->lobby.error, sizeof c->lobby.error, "connection lost");
         c->joined_at = 0;
         changed(c);
@@ -986,6 +1056,14 @@ void client_rotation(NetClient *c, const unsigned char *ids, int count)
     SDL_UnlockMutex(c->lock);
 }
 
+void client_check_connections(NetClient *c)
+{
+    SDL_LockMutex(c->lock);
+    if (c->connected && c->lobby.is_lan && c->lobby.is_host && c->lobby.state == NET_LOBBY)
+        say(c, "{\"type\":\"check_start\"}");
+    SDL_UnlockMutex(c->lock);
+}
+
 void client_race_go(NetClient *c, double at)
 {
     SDL_LockMutex(c->lock);
@@ -1000,7 +1078,8 @@ void client_leave(NetClient *c)
     SDL_LockMutex(c->lock);
     c->leaving = 1;
     c->rejoining = 0;  /* no frame goes out after this: ws_stop frees the transport */
-    if (c->racing)
+    c->reconnect_deadline_ms = 0;
+    if (c->racing || c->lobby.is_lan)
         say(c, "{\"type\":\"leave\"}");
     if (c->joined_at) {
         int s = (int)((net_now_ms() - c->joined_at) / 1000);
@@ -1017,6 +1096,9 @@ void client_lobby(NetClient *c, NetLobby *out)
     SDL_LockMutex(c->lock);
     *out = c->lobby;
     out->countdown_ms = -1;
+    out->reconnect_attempt = (int)c->rejoin_tries;
+    out->reconnect_remaining_ms = c->lobby.is_lan && c->reconnect_deadline_ms > net_now_ms()
+        ? (int)(c->reconnect_deadline_ms - net_now_ms()) : 0;
     if (c->countdown_ends > 0 && out->state == NET_LOBBY) {
         double left = c->countdown_ends - (net_now_ms() + c->clock_offset);
         out->countdown_ms = left > 0 ? (int)left : 0;

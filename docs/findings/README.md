@@ -26,11 +26,11 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | Renderer (GS, Rust/wgpu) | 021 GS core, 084 WGSL, 085/086 Rust renderer, 088 CL2, 131 draw pass, 045/136 scale, 171 lost device | 025, 031-033, 035, 038 |
 | VU0/VU1 | 016, 019, 030, 090 (VU1R, OP3, SP1) | 027, 029, 037 |
 | Audio and movies | 022, 133, 055 | |
-| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, `docs/online-protocol.md` | 039-042 (lockstep parts) |
+| Online (state sync) | 044 puppets, 047 race protocol, 114 any frame rate, 118/119 rooms, 123, 128, 135, 137, 144, 158 SFU transport, 177 room sessions, 186 P2P rooms (hub star, SFU fallback), 169 snapshots and prediction, 173 stalls, 175 rejoin in a race, 179, 199 Wi-Fi LAN/Tailscale (in progress), `docs/online-protocol.md` | 039-042 (lockstep parts) |
 | Menus, settings, input | 050, 064, 092, 101/102 settings, 059/134 controllers, 141 touch, 056/140 widescreen | 065 (WM_CHAR part) |
 | Launcher, releases, installers | 093, 125, 138, 143, 098 disc check | 053, 054, 070 |
 | Speed (PC) | 089, 090, 129 perf log, 130/131 iGPU | 031, 032, 046, 048, 051, 066, 069 |
-| Android and phones | 091, 107, 108, 126/127 low-end profile, 143, 145, 146-149, 170 PowerVR | |
+| Android and phones | 091, 107, 108, 126/127 low-end profile, 143, 145, 146-149, 170 PowerVR, 199 Wi-Fi LAN/Tailscale (in progress) | |
 | Browser | 083, 087, 102 | |
 
 ## Numbers not in this folder
@@ -229,6 +229,7 @@ out of date). New findings: copy `TEMPLATE.md` to the next free number on the la
 | 196 | [smooth bilinear sprites at high resolution scale](196-native-rt-texture-scale.md) | current |  |
 | 197 | [the phone's vertex loops and palette path, Native VU off](197-phone-speed-2.md) | current |  |
 | 198 | [Native VU is the default](198-native-vu-default.md) | current |  |
+| 199 | [Wi-Fi LAN and Tailscale remote rooms](199-android-lan.md) | in progress |  |
 | 075 | no file: the portable-core plan was numbered 075 on its branch and merged as 081 | renumbered | see 081 |
 | 113 | no file: the delta-time clock work was numbered 113 on its branch; the mixer's VBLANK time is in 139 | renumbered | see 139 |
 <!-- index:end -->

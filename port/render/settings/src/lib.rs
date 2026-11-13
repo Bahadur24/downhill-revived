@@ -85,7 +85,8 @@ pub fn save(path: &Path, key: &str, value: &str) -> io::Result<bool> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
         Err(e) => return Err(e),
     };
-    let ini = edited(old.as_deref(), key, value).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
+    let ini = edited(old.as_deref(), key, value)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
     let mut temp = path.as_os_str().to_owned();
     temp.push(".new");
     let temp = PathBuf::from(temp);
@@ -108,7 +109,11 @@ pub fn create(path: &Path) -> io::Result<()> {
     if disabled(path) {
         return Ok(());
     }
-    match fs::OpenOptions::new().write(true).create_new(true).open(path) {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
         Ok(mut f) => f.write_all(HEADER.as_bytes()),
         Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(e),
@@ -130,7 +135,10 @@ pub struct Environment {
 pub fn environment(ini: Option<&Ini>, is_set: impl Fn(&str) -> bool) -> Environment {
     let mut out = Environment::default();
     let mut overrides = String::from(",");
-    for s in SETTINGS.iter().filter(|s| !s.env.is_empty() && is_set(s.env)) {
+    for s in SETTINGS
+        .iter()
+        .filter(|s| !s.env.is_empty() && is_set(s.env))
+    {
         overrides += s.env;
         overrides += ",";
     }
@@ -141,7 +149,8 @@ pub fn environment(ini: Option<&Ini>, is_set: impl Fn(&str) -> bool) -> Environm
         }
     };
     // the window size's default is the pair's: only when neither side has a value anywhere
-    let size_named = |k: &str| ini.is_some_and(|i| i.has(k)) || table::find(k).is_some_and(|s| is_set(s.env));
+    let size_named =
+        |k: &str| ini.is_some_and(|i| i.has(k)) || table::find(k).is_some_and(|s| is_set(s.env));
     let size_free = !size_named("width") && !size_named("height");
     for s in SETTINGS.iter().filter(|s| !s.env.is_empty()) {
         match ini.and_then(|i| i.written(s.key)) {

@@ -50,14 +50,18 @@ pub fn mxcsr() -> u32 {
     {
         let mut v: u32 = 0;
         // SAFETY: stmxcsr stores 4 bytes into a valid local.
-        unsafe { core::arch::asm!("stmxcsr [{}]", in(reg) &mut v, options(nostack, preserves_flags)) };
+        unsafe {
+            core::arch::asm!("stmxcsr [{}]", in(reg) &mut v, options(nostack, preserves_flags))
+        };
         v
     }
     #[cfg(target_arch = "aarch64")]
     {
         let v: u64;
         // SAFETY: reading FPCR has no side effects.
-        unsafe { core::arch::asm!("mrs {}, fpcr", out(reg) v, options(nomem, nostack, preserves_flags)) };
+        unsafe {
+            core::arch::asm!("mrs {}, fpcr", out(reg) v, options(nomem, nostack, preserves_flags))
+        };
         v as u32
     }
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64")))]
@@ -135,8 +139,14 @@ pub fn install_hooks() {
     ONCE.call_once(|| {
         std::panic::set_hook(Box::new(|info| {
             let export = current_export();
-            crate::host::log(&format!("dhd_render: panic in {}: {info}",
-                                      if export.is_empty() { "(no export)" } else { export }));
+            crate::host::log(&format!(
+                "dhd_render: panic in {}: {info}",
+                if export.is_empty() {
+                    "(no export)"
+                } else {
+                    export
+                }
+            ));
         }));
         crate::log::install();
     });
@@ -169,7 +179,12 @@ fn out_of_memory(line: &str) {
         }
         #[link(name = "user32", kind = "raw-dylib")]
         extern "system" {
-            fn MessageBoxW(window: *mut std::ffi::c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
+            fn MessageBoxW(
+                window: *mut std::ffi::c_void,
+                text: *const u16,
+                caption: *const u16,
+                kind: u32,
+            ) -> i32;
         }
         crate::host::log(line);
         crate::host::log("dhd_render: the graphics card ran out of memory; the game ends");
@@ -182,7 +197,14 @@ fn out_of_memory(line: &str) {
             let caption = wide("Downhill Revived");
             // SAFETY: both strings are NUL-terminated and live across the call. MB_OK |
             // MB_ICONERROR | MB_SETFOREGROUND, as host_error_box.
-            unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), caption.as_ptr(), 0x10 | 0x10000) };
+            unsafe {
+                MessageBoxW(
+                    std::ptr::null_mut(),
+                    text.as_ptr(),
+                    caption.as_ptr(),
+                    0x10 | 0x10000,
+                )
+            };
         }
         // SAFETY: ends the process.
         unsafe { ExitProcess(1) }
@@ -207,14 +229,20 @@ unsafe impl<T: Send> Sync for Owned<T> {}
 
 impl<T> Owned<T> {
     pub fn new(value: T) -> Self {
-        Owned { busy: AtomicBool::new(false), holder: Mutex::new(""), inner: UnsafeCell::new(value) }
+        Owned {
+            busy: AtomicBool::new(false),
+            holder: Mutex::new(""),
+            inner: UnsafeCell::new(value),
+        }
     }
 
     fn acquire(&self, export: &'static str) {
         if self.busy.swap(true, Ordering::Acquire) {
             let holder = *self.holder.lock().unwrap_or_else(|p| p.into_inner());
-            fatal(&format!("dhd_render: {export}: the object is in use by {holder} (one call at a time; \
-                            nothing between a begin and its finish)"));
+            fatal(&format!(
+                "dhd_render: {export}: the object is in use by {holder} (one call at a time; \
+                            nothing between a begin and its finish)"
+            ));
         }
         *self.holder.lock().unwrap_or_else(|p| p.into_inner()) = export;
     }
@@ -247,10 +275,18 @@ impl<T> Owned<T> {
 
     /// The finish of a begin that held the object: aborts unless `begin_export` holds it, runs
     /// `f`, then releases it.
-    pub fn finish<R>(&self, export: &'static str, begin_export: &'static str, f: impl FnOnce(&mut T) -> R) -> R {
+    pub fn finish<R>(
+        &self,
+        export: &'static str,
+        begin_export: &'static str,
+        f: impl FnOnce(&mut T) -> R,
+    ) -> R {
         let holder = *self.holder.lock().unwrap_or_else(|p| p.into_inner());
         if !self.busy.load(Ordering::Acquire) || holder != begin_export {
-            fatal(&format!("dhd_render: {export} without a successful {begin_export} (held by {:?})", holder));
+            fatal(&format!(
+                "dhd_render: {export} without a successful {begin_export} (held by {:?})",
+                holder
+            ));
         }
         *self.holder.lock().unwrap_or_else(|p| p.into_inner()) = export;
         // SAFETY: busy is set and held by this begin/finish pair; no other entry gets in.
@@ -263,7 +299,9 @@ impl<T> Owned<T> {
     pub fn into_inner(self, export: &'static str) -> T {
         if self.busy.load(Ordering::Acquire) {
             let holder = *self.holder.lock().unwrap_or_else(|p| p.into_inner());
-            fatal(&format!("dhd_render: {export}: the object is in use by {holder}"));
+            fatal(&format!(
+                "dhd_render: {export}: the object is in use by {holder}"
+            ));
         }
         self.inner.into_inner()
     }

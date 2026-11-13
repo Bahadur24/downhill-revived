@@ -82,7 +82,8 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
   function lobby(a) {
     const rules=room.rules||{}, members=room.members||[], results=room.lastRace?.entrants||[];
     write('NetLobby',a,{state,seq,code:room.code||'',member_id:member,host_id:room.hostId??-1,is_host:room.hostId===member,
-      room_name:room.roomName||'',is_public:!!room.public,is_p2p:p2p||state===1,max_players:room.maxPlayers||0,started:!!room.started&&(!room.phase||!!me()?.inRace),
+      room_name:room.roomName||'',is_public:!!room.public,is_p2p:p2p||state===1,is_lan:false,lan_address:'',max_players:room.maxPlayers||0,started:!!room.started&&(!room.phase||!!me()?.inRace),
+      pin_required:false,lan_room_id:'',reconnect_remaining_ms:0,reconnect_attempt:0,
       track:room.settings?.track||0,laps:room.settings?.laps||0,seed:BigInt(room.settings?.seed??-1),
       nmembers:members.length,ping_ms:-1,local_slot:start.yourSlot||0,nslots:start.players?.length||0,
       race_track:start.track||0,race_laps:start.laps||0,race_seed:start.seed||0,
@@ -97,6 +98,7 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
       room_colo:where.colo??welcome.roomColo??'',room_region:where.region??welcome.roomRegion??''});
     members.slice(0,10).forEach((m,i)=>write('NetMember',a+layout.NetLobby.member[0]+i*layout.NetMember.size,
       {...m,rtt_ms:m.rttMs??-1,in_race:!!m.inRace,race_state:m.raceState||'',dnf_reason:m.dnfReason||'',finish_ticks:BigInt(m.finishTicks??-1),
+        connection_state:m.connectionState==='reconnecting'?1:0,reconnect_ms:m.reconnectMs??0,
         region:where.members?.find(x=>x.id===m.id)?.region||''}));
     (start.players||[]).slice(0,10).forEach((m,i)=>write('NetRacer',a+layout.NetLobby.racer[0]+i*layout.NetRacer.size,{...m,member_id:m.memberId}));
     results.slice(0,10).forEach((m,i)=>write('NetResult',a+layout.NetLobby.result[0]+i*layout.NetResult.size,{...m,dnf_reason:m.dnfReason||'',ticks:BigInt(m.ticks??-1)}));
@@ -108,6 +110,10 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_create_room:p2p=>connect(p2p?'/v1/rooms/new?transport=p2p':''),
     host_service_net_join_room:a=>{const code=str(a).toUpperCase();
       return /^[23456789A-HJKMNP-Z]+$/.test(code)&&code.length===P2P_CODE_LENGTH?connect('/v1/rooms/'+code):-1;},
+    host_service_net_host_lan:()=>-1,
+    host_service_net_join_lan:()=>-1,
+    host_service_net_join_lan_pin:()=>-1,
+    host_service_net_set_lan_pin:()=>-1,
     host_service_net_leave:()=>{send({type:'leave'});ws?.close();ws=null;clearInterval(timer);state=0;},
     host_service_net_get_lobby:lobby,
     host_service_net_pick:(member,rider,bike)=>send({type:'pick',...(member>=0?{member}:{}),...(rider<0?{choosing:true}:{rider,bike,choosing:false})}),
@@ -135,6 +141,9 @@ export function createNet({span, str, online = ONLINE_OFFERED, openSocket = open
     host_service_net_list_lobbies_start:()=>0,
     host_service_net_list_lobbies_poll:()=>-1,
     host_service_net_list_lobbies:()=>0,
+    host_service_net_lan_interfaces:()=>-1,
+    host_service_net_lan_select_ip:()=>0,
+    host_service_net_lan_refresh_address:()=>0,
   };
   return api;
 }

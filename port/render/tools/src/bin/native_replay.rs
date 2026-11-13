@@ -96,7 +96,9 @@ fn pod_read<T: Pod>(b: &[u8]) -> T {
     assert_eq!(b.len(), size_of::<T>());
     let mut v = T::default();
     // SAFETY: T is Pod (any bytes are a valid value) and both regions are size_of::<T>() bytes.
-    unsafe { std::ptr::copy_nonoverlapping(b.as_ptr(), &mut v as *mut T as *mut u8, size_of::<T>()) };
+    unsafe {
+        std::ptr::copy_nonoverlapping(b.as_ptr(), &mut v as *mut T as *mut u8, size_of::<T>())
+    };
     v
 }
 
@@ -127,7 +129,9 @@ fn command_head(k: &DhdrCommand) -> &[u8] {
 }
 
 fn words(b: &[u8]) -> Vec<u32> {
-    b.chunks_exact(4).map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect()
+    b.chunks_exact(4)
+        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect()
 }
 
 fn word_bytes(w: &[u32]) -> Vec<u8> {
@@ -147,7 +151,10 @@ impl<'a> Le<'a> {
     fn take(&mut self, n: u64) -> Result<&'a [u8], String> {
         let left = (self.b.len() - self.at) as u64;
         if n > left {
-            return Err(format!("the payload is {} bytes, too short for its contents", self.b.len()));
+            return Err(format!(
+                "the payload is {} bytes, too short for its contents",
+                self.b.len()
+            ));
         }
         let s = &self.b[self.at..self.at + n as usize];
         self.at += n as usize;
@@ -173,7 +180,10 @@ impl<'a> Le<'a> {
     }
     fn done(&self) -> Result<(), String> {
         if self.left() != 0 {
-            return Err(format!("the payload has {} bytes more than its contents", self.left()));
+            return Err(format!(
+                "the payload has {} bytes more than its contents",
+                self.left()
+            ));
         }
         Ok(())
     }
@@ -296,16 +306,29 @@ fn compiler_name(c: u32) -> String {
 
 fn driver_text(api: u32, v: u64) -> String {
     if api == 1 {
-        format!("{}.{}.{}.{} (0x{v:016x})", v >> 48, (v >> 32) & 0xFFFF, (v >> 16) & 0xFFFF, v & 0xFFFF)
+        format!(
+            "{}.{}.{}.{} (0x{v:016x})",
+            v >> 48,
+            (v >> 32) & 0xFFFF,
+            (v >> 16) & 0xFFFF,
+            v & 0xFFFF
+        )
     } else {
         format!("0x{v:x}")
     }
 }
 
 fn identity_text(i: &Identity, name: &str) -> String {
-    format!("{} vendor 0x{:04x} device 0x{:04x} driver {} compiler {} fallback {} \"{}\"",
-            api_name(i.api), i.vendor_id, i.device_id, driver_text(i.api, i.driver_version),
-            compiler_name(i.compiler), i.fallback_adapter, name)
+    format!(
+        "{} vendor 0x{:04x} device 0x{:04x} driver {} compiler {} fallback {} \"{}\"",
+        api_name(i.api),
+        i.vendor_id,
+        i.device_id,
+        driver_text(i.api, i.driver_version),
+        compiler_name(i.compiler),
+        i.fallback_adapter,
+        name
+    )
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -388,7 +411,10 @@ struct Expect {
 
 fn decode_picture(p: &[u8]) -> Result<PicHead, String> {
     if p.len() < PICTURE_FIXED {
-        return Err(format!("{} bytes, fewer than PICTURE's {PICTURE_FIXED}", p.len()));
+        return Err(format!(
+            "{} bytes, fewer than PICTURE's {PICTURE_FIXED}",
+            p.len()
+        ));
     }
     let mut r = Le::new(p);
     let mut h = PicHead {
@@ -412,15 +438,22 @@ fn decode_picture(p: &[u8]) -> Result<PicHead, String> {
     let label = r.u32()?;
     let label = r.take(label as u64)?;
     r.done()?;
-    h.label = String::from_utf8(label.to_vec()).map_err(|_| "the picture label is not UTF-8".to_string())?;
+    h.label = String::from_utf8(label.to_vec())
+        .map_err(|_| "the picture label is not UTF-8".to_string())?;
     if h.flags & !1 != 0 {
-        return Err(format!("picture_flags 0x{:x} has bits other than bit 0", h.flags));
+        return Err(format!(
+            "picture_flags 0x{:x} has bits other than bit 0",
+            h.flags
+        ));
     }
     if h.movie_on > 1 {
         return Err(format!("movie_on is {}", h.movie_on));
     }
     if h.surface_count > DHDR_NATIVE_SURFACES {
-        return Err(format!("{} surfaces (at most {DHDR_NATIVE_SURFACES})", h.surface_count));
+        return Err(format!(
+            "{} surfaces (at most {DHDR_NATIVE_SURFACES})",
+            h.surface_count
+        ));
     }
     Ok(h)
 }
@@ -461,7 +494,11 @@ fn decode_converts(p: &[u8]) -> Result<Vec<ConvertRec>, String> {
     for _ in 0..n {
         let surface = [r.i16()?, r.i16()?, r.i16()?, r.i16()?];
         let constants = pod_read::<DhdrConvertConstants>(r.take(1632)?);
-        v.push(ConvertRec { surface, constants, base: r.u32()? });
+        v.push(ConvertRec {
+            surface,
+            constants,
+            base: r.u32()?,
+        });
     }
     r.done()?;
     Ok(v)
@@ -481,11 +518,20 @@ fn decode_commands(p: &[u8]) -> Result<Vec<CommandRec>, String> {
         let bytes = r.u32()? as u64;
         let want = command_pixel_bytes(&head);
         if bytes != want {
-            return Err(format!("command {i} ({}, {}x{}) carries {bytes} pixel bytes, not {want}",
-                               kind_name(head.kind), head.w, head.h));
+            return Err(format!(
+                "command {i} ({}, {}x{}) carries {bytes} pixel bytes, not {want}",
+                kind_name(head.kind),
+                head.w,
+                head.h
+            ));
         }
         let pixels = words(r.take(bytes)?);
-        v.push(CommandRec { head, texture, replacement, pixels });
+        v.push(CommandRec {
+            head,
+            texture,
+            replacement,
+            pixels,
+        });
     }
     r.done()?;
     Ok(v)
@@ -495,7 +541,10 @@ fn decode_movie(p: &[u8]) -> Result<(u32, u32, Vec<u32>), String> {
     let mut r = Le::new(p);
     let (w, h) = (r.u32()?, r.u32()?);
     if sized(8, w as u64 * h as u64, 4) != Some(p.len() as u64) {
-        return Err(format!("a {w}x{h} movie frame in a {}-byte payload", p.len()));
+        return Err(format!(
+            "a {w}x{h} movie frame in a {}-byte payload",
+            p.len()
+        ));
     }
     let px = words(r.take(w as u64 * h as u64 * 4)?);
     r.done()?;
@@ -509,10 +558,18 @@ fn decode_result(p: &[u8]) -> Result<Expect, String> {
         return Err(format!("shown is {}", result.shown));
     }
     if result.shown == 0 && (result.display_width != 0 || result.display_height != 0) {
-        return Err(format!("not shown, but the display is {}x{}", result.display_width, result.display_height));
+        return Err(format!(
+            "not shown, but the display is {}x{}",
+            result.display_width, result.display_height
+        ));
     }
     let px = if result.shown == 1 {
-        sized(0, result.display_width as u64 * result.display_height as u64, 4).ok_or("the display size overflows")?
+        sized(
+            0,
+            result.display_width as u64 * result.display_height as u64,
+            4,
+        )
+        .ok_or("the display size overflows")?
     } else {
         0
     };
@@ -523,7 +580,11 @@ fn decode_result(p: &[u8]) -> Result<Expect, String> {
     }
     let after = (0..n).map(|_| r.u32()).collect::<Result<Vec<_>, _>>()?;
     r.done()?;
-    Ok(Expect { result, display, after })
+    Ok(Expect {
+        result,
+        display,
+        after,
+    })
 }
 
 // ------------------------------------------------------------------------------------ the trace
@@ -584,18 +645,27 @@ fn parse_header(b: &[u8], file_len: u64) -> Result<Header, Problem> {
     let u = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
     let version = u(8);
     if version != VERSION {
-        return Err(Problem::Refuse(format!("trace version {version}: this replayer knows version {VERSION} only")));
+        return Err(Problem::Refuse(format!(
+            "trace version {version}: this replayer knows version {VERSION} only"
+        )));
     }
     let header_bytes = u(12);
-    if header_bytes % 4 != 0 || (header_bytes as usize) < HEADER_FIXED + 8 || header_bytes as u64 > file_len {
-        return Err(Problem::Invalid(format!("header_bytes {header_bytes} (file {file_len} bytes)")));
+    if header_bytes % 4 != 0
+        || (header_bytes as usize) < HEADER_FIXED + 8
+        || header_bytes as u64 > file_len
+    {
+        return Err(Problem::Invalid(format!(
+            "header_bytes {header_bytes} (file {file_len} bytes)"
+        )));
     }
     if b.len() != header_bytes as usize {
         return Err(Problem::Invalid("the header is cut short".into()));
     }
     let flags = u(16);
     if flags & !1 != 0 {
-        return Err(Problem::Invalid(format!("header flags 0x{flags:x} has bits other than DUAL")));
+        return Err(Problem::Invalid(format!(
+            "header flags 0x{flags:x} has bits other than DUAL"
+        )));
     }
     let sha = &b[48..88];
     if !sha.iter().all(|c| c.is_ascii_hexdigit()) {
@@ -604,12 +674,16 @@ fn parse_header(b: &[u8], file_len: u64) -> Result<Header, Problem> {
     let mut at = HEADER_FIXED;
     let mut text = |what: &str| -> Result<String, Problem> {
         if at + 4 > b.len() {
-            return Err(Problem::Invalid(format!("the header ends inside its {what}")));
+            return Err(Problem::Invalid(format!(
+                "the header ends inside its {what}"
+            )));
         }
         let n = u32::from_le_bytes(b[at..at + 4].try_into().unwrap()) as usize;
         at += 4;
         if n > b.len() - at {
-            return Err(Problem::Invalid(format!("the {what} ({n} bytes) runs past header_bytes")));
+            return Err(Problem::Invalid(format!(
+                "the {what} ({n} bytes) runs past header_bytes"
+            )));
         }
         let s = String::from_utf8(b[at..at + n].to_vec())
             .map_err(|_| Problem::Invalid(format!("the {what} is not UTF-8")))?;
@@ -653,18 +727,29 @@ impl<R: Read + Seek> Trace<R> {
         }
         let version = u32::from_le_bytes(first[8..12].try_into().unwrap());
         if version != VERSION {
-            return Err(Problem::Refuse(format!("trace version {version}: this replayer knows version {VERSION} only")));
+            return Err(Problem::Refuse(format!(
+                "trace version {version}: this replayer knows version {VERSION} only"
+            )));
         }
         let header_bytes = u32::from_le_bytes(first[12..16].try_into().unwrap()) as usize;
         if header_bytes % 4 != 0 || header_bytes < HEADER_FIXED + 8 || header_bytes as u64 > len {
-            return Err(Problem::Invalid(format!("header_bytes {header_bytes} (file {len} bytes)")));
+            return Err(Problem::Invalid(format!(
+                "header_bytes {header_bytes} (file {len} bytes)"
+            )));
         }
         let mut hb = vec![0u8; header_bytes];
         hb[..16].copy_from_slice(&first);
         src.read_exact(&mut hb[16..])?;
         let header = parse_header(&hb, len)?;
 
-        let mut t = Trace { src, header, textures: Vec::new(), blobs: Vec::new(), pictures: Vec::new(), records: 0 };
+        let mut t = Trace {
+            src,
+            header,
+            textures: Vec::new(),
+            blobs: Vec::new(),
+            pictures: Vec::new(),
+            records: 0,
+        };
         let mut pos = header_bytes as u64;
         let mut fnv = FNV_BASIS;
         let mut counts = [0u32; 16];
@@ -684,7 +769,10 @@ impl<R: Read + Seek> Trace<R> {
             let bytes = u32::from_le_bytes(rh[4..8].try_into().unwrap());
             if tag == T_END {
                 if bytes != END_BYTES {
-                    return invalid(pos, format!("END has {bytes} payload bytes, not {END_BYTES}"));
+                    return invalid(
+                        pos,
+                        format!("END has {bytes} payload bytes, not {END_BYTES}"),
+                    );
                 }
                 if pos + 8 + END_BYTES as u64 > len {
                     return invalid(pos, "END is truncated");
@@ -692,7 +780,10 @@ impl<R: Read + Seek> Trace<R> {
                 let mut e = [0u8; END_BYTES as usize];
                 t.src.read_exact(&mut e)?;
                 if pos + 8 + END_BYTES as u64 != len {
-                    return invalid(pos, format!("{} bytes after END", len - (pos + 8 + END_BYTES as u64)));
+                    return invalid(
+                        pos,
+                        format!("{} bytes after END", len - (pos + 8 + END_BYTES as u64)),
+                    );
                 }
                 if stage != Stage::Outside {
                     return invalid(pos, format!("END inside picture {}", head.index));
@@ -701,10 +792,16 @@ impl<R: Read + Seek> Trace<R> {
                 let (records, sum) = (r.u64().unwrap(), r.u64().unwrap());
                 let want: Vec<u32> = (0..16).map(|_| r.u32().unwrap()).collect();
                 if records != t.records {
-                    return invalid(pos, format!("END counts {records} records, the trace has {}", t.records));
+                    return invalid(
+                        pos,
+                        format!("END counts {records} records, the trace has {}", t.records),
+                    );
                 }
                 if want[..] != counts[..] {
-                    return invalid(pos, format!("END's per-tag counts {want:?} differ from the trace's {counts:?}"));
+                    return invalid(
+                        pos,
+                        format!("END's per-tag counts {want:?} differ from the trace's {counts:?}"),
+                    );
                 }
                 if sum != fnv {
                     return invalid(pos, format!("FNV-1a 0x{fnv:016x} of the records, END says 0x{sum:016x}: an edited trace"));
@@ -716,69 +813,126 @@ impl<R: Read + Seek> Trace<R> {
             }
             let padded = (bytes as u64 + 3) & !3;
             if pos + 8 + padded > len {
-                return invalid(pos, format!("{} record of {bytes} bytes runs past the end of the file", tag_name(tag)));
+                return invalid(
+                    pos,
+                    format!(
+                        "{} record of {bytes} bytes runs past the end of the file",
+                        tag_name(tag)
+                    ),
+                );
             }
             buf.resize(padded as usize, 0);
             t.src.read_exact(&mut buf)?;
             fnv = fnv1a(fnv1a(fnv, &rh), &buf);
             if buf[bytes as usize..].iter().any(|&c| c != 0) {
-                return invalid(pos, format!("{} record's padding is not zero", tag_name(tag)));
+                return invalid(
+                    pos,
+                    format!("{} record's padding is not zero", tag_name(tag)),
+                );
             }
             t.records += 1;
             counts[tag as usize] += 1;
             let payload = &buf[..bytes as usize];
             let data = pos + 8;
             let at = Some((data, bytes));
-            let ctx = format!("at byte {pos}: {} record{}", tag_name(tag),
-                              if stage == Stage::Outside { String::new() } else { format!(" of picture {}", head.index) });
+            let ctx = format!(
+                "at byte {pos}: {} record{}",
+                tag_name(tag),
+                if stage == Stage::Outside {
+                    String::new()
+                } else {
+                    format!(" of picture {}", head.index)
+                }
+            );
             let bad = |what: String| Problem::Invalid(format!("{ctx}: {what}"));
             let order = |stage: Stage, want: &[Stage]| -> Result<(), Problem> {
                 if want.contains(&stage) {
                     Ok(())
                 } else {
-                    Err(Problem::Invalid(format!("at byte {pos}: a {} record out of order (after {stage:?})", tag_name(tag))))
+                    Err(Problem::Invalid(format!(
+                        "at byte {pos}: a {} record out of order (after {stage:?})",
+                        tag_name(tag)
+                    )))
                 }
             };
             match tag {
                 T_TEXTURE => {
                     let mut r = Le::new(payload);
-                    let f = (|| Ok::<_, String>((r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?)))();
+                    let f =
+                        (|| Ok::<_, String>((r.u32()?, r.u32()?, r.u32()?, r.u32()?, r.u32()?)))();
                     let (id, kind, w, h, levels) = f.map_err(&bad)?;
                     if id != t.textures.len() as u32 {
-                        return Err(bad(format!("id {id}, the next id is {} (ids count from 0, each defined once)", t.textures.len())));
+                        return Err(bad(format!(
+                            "id {id}, the next id is {} (ids count from 0, each defined once)",
+                            t.textures.len()
+                        )));
                     }
                     let want = match kind {
-                        1 if levels == 1 => (w as u64).checked_mul(h as u64).and_then(|n| n.checked_mul(4)).filter(|&n| n > 0),
+                        1 if levels == 1 => (w as u64)
+                            .checked_mul(h as u64)
+                            .and_then(|n| n.checked_mul(4))
+                            .filter(|&n| n > 0),
                         2 => dhd_render::native::mip_bytes(w, h, levels).map(|b| b as u64),
                         _ => None,
                     };
                     match want {
                         Some(b) if b.checked_add(20) == Some(bytes as u64) => {}
-                        _ => return Err(bad(format!("kind {kind} {w}x{h}, {levels} levels, in {bytes} bytes"))),
+                        _ => {
+                            return Err(bad(format!(
+                                "kind {kind} {w}x{h}, {levels} levels, in {bytes} bytes"
+                            )))
+                        }
                     }
-                    t.textures.push(TexMeta { kind, w, h, levels, data: data + 20, bytes: bytes as u64 - 20 });
+                    t.textures.push(TexMeta {
+                        kind,
+                        w,
+                        h,
+                        levels,
+                        data: data + 20,
+                        bytes: bytes as u64 - 20,
+                    });
                 }
                 T_BLOB => {
                     let mut r = Le::new(payload);
                     let f = (|| Ok::<_, String>((r.u32()?, r.u32()?, r.u32()?, r.u32()?)))();
                     let (id, format, w, h) = f.map_err(&bad)?;
                     if id != t.blobs.len() as u32 {
-                        return Err(bad(format!("id {id}, the next id is {} (ids count from 0, each defined once)", t.blobs.len())));
+                        return Err(bad(format!(
+                            "id {id}, the next id is {} (ids count from 0, each defined once)",
+                            t.blobs.len()
+                        )));
                     }
-                    if !(1..=2).contains(&format) || w == 0 || h == 0
-                        || sized(16, w as u64 * h as u64, 4) != Some(bytes as u64) {
+                    if !(1..=2).contains(&format)
+                        || w == 0
+                        || h == 0
+                        || sized(16, w as u64 * h as u64, 4) != Some(bytes as u64)
+                    {
                         return Err(bad(format!("format {format} {w}x{h} in {bytes} bytes")));
                     }
-                    t.blobs.push(BlobMeta { format, w, h, data: data + 16 });
+                    t.blobs.push(BlobMeta {
+                        format,
+                        w,
+                        h,
+                        data: data + 16,
+                    });
                 }
                 T_PICTURE => {
                     order(stage, &[Stage::Outside])?;
                     head = decode_picture(payload).map_err(&bad)?;
                     if last_index.is_some_and(|l| head.index <= l) {
-                        return Err(bad(format!("index {} after picture {}: indices must increase", head.index, last_index.unwrap())));
+                        return Err(bad(format!(
+                            "index {} after picture {}: indices must increase",
+                            head.index,
+                            last_index.unwrap()
+                        )));
                     }
                     last_index = Some(head.index);
-                    cur = PicMeta { index: head.index, label: head.label.clone(), field: head.field, ..Default::default() };
+                    cur = PicMeta {
+                        index: head.index,
+                        label: head.label.clone(),
+                        field: head.field,
+                        ..Default::default()
+                    };
                     cur.at[0] = at;
                     stage = Stage::Picture;
                 }
@@ -786,7 +940,11 @@ impl<R: Read + Seek> Trace<R> {
                     order(stage, &[Stage::Picture])?;
                     let (inf, before) = decode_surfaces(payload).map_err(&bad)?;
                     if inf.len() as u32 != head.surface_count {
-                        return Err(bad(format!("{} surfaces, PICTURE says {}", inf.len(), head.surface_count)));
+                        return Err(bad(format!(
+                            "{} surfaces, PICTURE says {}",
+                            inf.len(),
+                            head.surface_count
+                        )));
                     }
                     for (i, (s, &b)) in inf.iter().zip(&before).enumerate() {
                         t.check_blob(s, b, i, "before").map_err(&bad)?;
@@ -799,7 +957,11 @@ impl<R: Read + Seek> Trace<R> {
                     order(stage, &[Stage::Surfaces])?;
                     let v = decode_vertices(payload).map_err(&bad)?;
                     if v.len() as u32 != head.vertex_count {
-                        return Err(bad(format!("{} vertices, PICTURE says {}", v.len(), head.vertex_count)));
+                        return Err(bad(format!(
+                            "{} vertices, PICTURE says {}",
+                            v.len(),
+                            head.vertex_count
+                        )));
                     }
                     cur.at[2] = at;
                     stage = Stage::Vertices;
@@ -808,10 +970,15 @@ impl<R: Read + Seek> Trace<R> {
                     order(stage, &[Stage::Vertices])?;
                     let v = decode_converts(payload).map_err(&bad)?;
                     if v.len() as u32 != head.convert_count {
-                        return Err(bad(format!("{} conversions, PICTURE says {}", v.len(), head.convert_count)));
+                        return Err(bad(format!(
+                            "{} conversions, PICTURE says {}",
+                            v.len(),
+                            head.convert_count
+                        )));
                     }
                     for (i, c) in v.iter().enumerate() {
-                        t.check_texture(c.base, 1, &format!("conversion {i}'s base")).map_err(&bad)?;
+                        t.check_texture(c.base, 1, &format!("conversion {i}'s base"))
+                            .map_err(&bad)?;
                     }
                     cur.at[3] = at;
                     stage = Stage::Converts;
@@ -820,11 +987,17 @@ impl<R: Read + Seek> Trace<R> {
                     order(stage, &[Stage::Converts])?;
                     let v = decode_commands(payload).map_err(&bad)?;
                     if v.len() as u32 != head.command_count {
-                        return Err(bad(format!("{} commands, PICTURE says {}", v.len(), head.command_count)));
+                        return Err(bad(format!(
+                            "{} commands, PICTURE says {}",
+                            v.len(),
+                            head.command_count
+                        )));
                     }
                     for (i, c) in v.iter().enumerate() {
-                        t.check_texture(c.texture, 1, &format!("command {i}'s texture")).map_err(&bad)?;
-                        t.check_texture(c.replacement, 2, &format!("command {i}'s replacement")).map_err(&bad)?;
+                        t.check_texture(c.texture, 1, &format!("command {i}'s texture"))
+                            .map_err(&bad)?;
+                        t.check_texture(c.replacement, 2, &format!("command {i}'s replacement"))
+                            .map_err(&bad)?;
                         if c.head.kind == DHDR_CMD_DRAW {
                             cur.has_draw = true;
                             if c.head.convert != DHDR_NO_INDEX {
@@ -842,7 +1015,10 @@ impl<R: Read + Seek> Trace<R> {
                     }
                     let (w, h, _) = decode_movie(payload).map_err(&bad)?;
                     if (w, h) != (head.movie_width, head.movie_height) {
-                        return Err(bad(format!("{w}x{h}, PICTURE says {}x{}", head.movie_width, head.movie_height)));
+                        return Err(bad(format!(
+                            "{w}x{h}, PICTURE says {}x{}",
+                            head.movie_width, head.movie_height
+                        )));
                     }
                     cur.at[5] = at;
                     stage = Stage::Movie;
@@ -855,7 +1031,11 @@ impl<R: Read + Seek> Trace<R> {
                     }
                     let e = decode_result(payload).map_err(&bad)?;
                     if e.after.len() as u32 != head.surface_count {
-                        return Err(bad(format!("{} surfaces after, PICTURE says {}", e.after.len(), head.surface_count)));
+                        return Err(bad(format!(
+                            "{} surfaces after, PICTURE says {}",
+                            e.after.len(),
+                            head.surface_count
+                        )));
                     }
                     for (i, (s, &a)) in infos.iter().zip(&e.after).enumerate() {
                         t.check_blob(s, a, i, "after").map_err(&bad)?;
@@ -873,19 +1053,32 @@ impl<R: Read + Seek> Trace<R> {
     fn check_blob(&self, s: &DhdrSurfaceInfo, id: u32, i: usize, what: &str) -> Result<(), String> {
         if !surface_used(s) {
             if id != NONE {
-                return Err(format!("surface {i} is {}x{} but has a {what} blob", s.size[0], s.size[1]));
+                return Err(format!(
+                    "surface {i} is {}x{} but has a {what} blob",
+                    s.size[0], s.size[1]
+                ));
             }
             return Ok(());
         }
         if id == NONE {
-            return Err(format!("surface {i} ({}x{}) has no {what} blob", s.size[0], s.size[1]));
+            return Err(format!(
+                "surface {i} ({}x{}) has no {what} blob",
+                s.size[0], s.size[1]
+            ));
         }
         let Some(b) = self.blobs.get(id as usize) else {
             return Err(format!("surface {i}'s {what} blob {id} is not defined yet"));
         };
         if (b.w, b.h) != (s.size[0], s.size[1]) || b.format != surface_format(s) {
-            return Err(format!("surface {i} is {}x{} format {}, its {what} blob {id} is {}x{} format {}",
-                               s.size[0], s.size[1], surface_format(s), b.w, b.h, b.format));
+            return Err(format!(
+                "surface {i} is {}x{} format {}, its {what} blob {id} is {}x{} format {}",
+                s.size[0],
+                s.size[1],
+                surface_format(s),
+                b.w,
+                b.h,
+                b.format
+            ));
         }
         Ok(())
     }
@@ -896,14 +1089,19 @@ impl<R: Read + Seek> Trace<R> {
         }
         match self.textures.get(id as usize) {
             None => Err(format!("{what} {id} is not defined yet")),
-            Some(t) if t.kind != kind => Err(format!("{what} {id} is a kind {} texture, not kind {kind}", t.kind)),
+            Some(t) if t.kind != kind => Err(format!(
+                "{what} {id} is a kind {} texture, not kind {kind}",
+                t.kind
+            )),
             Some(_) => Ok(()),
         }
     }
 
     fn read_at(&mut self, offset: u64, bytes: u64) -> Result<Vec<u8>, String> {
         let mut v = vec![0u8; bytes as usize];
-        self.src.seek(SeekFrom::Start(offset)).and_then(|_| self.src.read_exact(&mut v))
+        self.src
+            .seek(SeekFrom::Start(offset))
+            .and_then(|_| self.src.read_exact(&mut v))
             .map_err(|e| format!("read failed: {e}"))?;
         Ok(v)
     }
@@ -921,9 +1119,24 @@ impl<R: Read + Seek> Trace<R> {
         let vertices = decode_vertices(&self.record(at[2])?)?;
         let converts = decode_converts(&self.record(at[3])?)?;
         let commands = decode_commands(&self.record(at[4])?)?;
-        let movie = if head.movie_on == 1 { decode_movie(&self.record(at[5])?)?.2 } else { Vec::new() };
+        let movie = if head.movie_on == 1 {
+            decode_movie(&self.record(at[5])?)?.2
+        } else {
+            Vec::new()
+        };
         let expect = decode_result(&self.record(at[6])?)?;
-        Ok((PictureInput { head, surfaces, before, vertices, converts, commands, movie }, expect))
+        Ok((
+            PictureInput {
+                head,
+                surfaces,
+                before,
+                vertices,
+                converts,
+                commands,
+                movie,
+            },
+            expect,
+        ))
     }
 }
 
@@ -935,11 +1148,17 @@ trait Inputs {
 
 impl<R: Read + Seek> Inputs for Trace<R> {
     fn blob(&mut self, id: u32) -> Result<Vec<u8>, String> {
-        let b = *self.blobs.get(id as usize).ok_or(format!("blob {id} is not in the trace"))?;
+        let b = *self
+            .blobs
+            .get(id as usize)
+            .ok_or(format!("blob {id} is not in the trace"))?;
         self.read_at(b.data, b.w as u64 * b.h as u64 * 4)
     }
     fn texture(&mut self, id: u32) -> Result<(TexMeta, Vec<u8>), String> {
-        let t = *self.textures.get(id as usize).ok_or(format!("texture {id} is not in the trace"))?;
+        let t = *self
+            .textures
+            .get(id as usize)
+            .ok_or(format!("texture {id} is not in the trace"))?;
         Ok((t, self.read_at(t.data, t.bytes)?))
     }
 }
@@ -961,7 +1180,12 @@ trait Backend {
     fn adapter_name(&self) -> String;
     fn dual_source(&self) -> bool;
     /// Draws one picture on its own: fresh renderer state, the surfaces from their `before` blobs.
-    fn draw(&mut self, p: &PictureInput, dual: bool, inputs: &mut dyn Inputs) -> Result<Drawn, String>;
+    fn draw(
+        &mut self,
+        p: &PictureInput,
+        dual: bool,
+        inputs: &mut dyn Inputs,
+    ) -> Result<Drawn, String>;
 }
 
 /// The surface contents a replay sets and reads back. The native renderer's surface module (task
@@ -1001,7 +1225,10 @@ struct DeviceBackend {
 
 /// The DX12 user-mode driver version from wgpu-hal's "a.b.c.d" (0 when it is not that).
 fn parse_driver(s: &str) -> u64 {
-    let parts: Vec<u64> = s.split('.').filter_map(|p| p.parse::<u16>().ok().map(u64::from)).collect();
+    let parts: Vec<u64> = s
+        .split('.')
+        .filter_map(|p| p.parse::<u16>().ok().map(u64::from))
+        .collect();
     if parts.len() != 4 || s.split('.').count() != 4 {
         return 0;
     }
@@ -1029,17 +1256,27 @@ impl DeviceBackend {
                 2 => {
                     let path = match dxc {
                         Some(p) => p,
-                        None => std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("dxcompiler.dll")))
-                            .filter(|p| p.is_file()).map(|p| p.to_string_lossy().into_owned())
-                            .ok_or("the trace was recorded with DXC: pass --dxc <dxcompiler.dll> \
-                                    (none beside native_replay.exe)")?,
+                        None => std::env::current_exe()
+                            .ok()
+                            .and_then(|e| e.parent().map(|d| d.join("dxcompiler.dll")))
+                            .filter(|p| p.is_file())
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .ok_or(
+                                "the trace was recorded with DXC: pass --dxc <dxcompiler.dll> \
+                                    (none beside native_replay.exe)",
+                            )?,
                     };
                     if !std::path::Path::new(&path).is_file() {
                         return Err(format!("--dxc {path}: no such file"));
                     }
                     dxc_path = Some(path);
                 }
-                c => return Err(format!("the trace's DX12 compiler is {}: a replay cannot match it", compiler_name(c))),
+                c => {
+                    return Err(format!(
+                        "the trace's DX12 compiler is {}: a replay cannot match it",
+                        compiler_name(c)
+                    ))
+                }
             }
         }
         let o = dhd_render::device::DeviceOptions {
@@ -1053,7 +1290,11 @@ impl DeviceBackend {
             return Err("no device (the renderer logged why)".into());
         }
         let gpu = dhd_render::device::gpu().ok_or("no device after init")?;
-        Ok(DeviceBackend { gpu, textures: HashMap::new(), _guard: guard })
+        Ok(DeviceBackend {
+            gpu,
+            textures: HashMap::new(),
+            _guard: guard,
+        })
     }
 
     fn handle(&mut self, id: u32, inputs: &mut dyn Inputs) -> Result<*mut DhdrTexture, String> {
@@ -1106,7 +1347,11 @@ impl Backend for DeviceBackend {
             api,
             vendor_id: info.vendor,
             device_id: info.device,
-            driver_version: if api == 1 { parse_driver(&info.driver) } else { 0 },
+            driver_version: if api == 1 {
+                parse_driver(&info.driver)
+            } else {
+                0
+            },
             compiler,
             fallback_adapter: (format!("{:?}", info.device_type) == "Cpu") as u32,
         }
@@ -1120,32 +1365,50 @@ impl Backend for DeviceBackend {
         dhd_render::device::has_dual_source(self.gpu)
     }
 
-    fn draw(&mut self, p: &PictureInput, dual: bool, inputs: &mut dyn Inputs) -> Result<Drawn, String> {
+    fn draw(
+        &mut self,
+        p: &PictureInput,
+        dual: bool,
+        inputs: &mut dyn Inputs,
+    ) -> Result<Drawn, String> {
         use dhd_render::native::{Native, Picture};
         let mut n = Native::create(self.gpu, if dual { DHDR_NATIVE_DUAL } else { 0 })?;
         for (i, s) in p.surfaces.iter().enumerate() {
             if !surface_used(s) {
                 continue;
             }
-            let got = n.surface(i as u32, s.scale, s.size[0], s.size[1], s.depth != 0)
+            let got = n
+                .surface(i as u32, s.scale, s.size[0], s.size[1], s.depth != 0)
                 .map_err(|e| format!("surface {i}: {e}"))?;
             if got != s.size {
-                return Err(format!("surface {i}: made {}x{}, the trace's is {}x{}", got[0], got[1], s.size[0], s.size[1]));
+                return Err(format!(
+                    "surface {i}: made {}x{}, the trace's is {}x{}",
+                    got[0], got[1], s.size[0], s.size[1]
+                ));
             }
             let before = inputs.blob(p.before[i])?;
-            n.surface_fill(i as u32, &before).map_err(|e| format!("surface {i}: {e}"))?;
+            n.surface_fill(i as u32, &before)
+                .map_err(|e| format!("surface {i}: {e}"))?;
         }
         let mut commands = Vec::with_capacity(p.commands.len());
         for c in &p.commands {
             let mut k = c.head;
             k.texture = self.handle(c.texture, inputs)?;
             k.replacement = self.handle(c.replacement, inputs)?;
-            k.pixels = if c.pixels.is_empty() { std::ptr::null() } else { c.pixels.as_ptr() };
+            k.pixels = if c.pixels.is_empty() {
+                std::ptr::null()
+            } else {
+                c.pixels.as_ptr()
+            };
             commands.push(k);
         }
         let mut converts = Vec::with_capacity(p.converts.len());
         for c in &p.converts {
-            converts.push(DhdrConvert { surface: c.surface, constants: c.constants, base: self.handle(c.base, inputs)? });
+            converts.push(DhdrConvert {
+                surface: c.surface,
+                constants: c.constants,
+                base: self.handle(c.base, inputs)?,
+            });
         }
         let h = &p.head;
         let pic = Picture {
@@ -1155,13 +1418,19 @@ impl Backend for DeviceBackend {
             surfaces: &p.surfaces,
             display_surface: h.display_surface,
             display: h.display,
-            movie: if h.movie_on == 1 { Some((h.movie_width, h.movie_height, &p.movie[..])) } else { None },
+            movie: if h.movie_on == 1 {
+                Some((h.movie_width, h.movie_height, &p.movie[..]))
+            } else {
+                None
+            },
             scale: h.scale,
         };
         let result = n.picture(&pic)?;
         let mut display = Vec::new();
         if result.shown == 1 {
-            let (w, h) = n.read_begin().ok_or("the picture was shown, but read_begin has no display")?;
+            let (w, h) = n
+                .read_begin()
+                .ok_or("the picture was shown, but read_begin has no display")?;
             display = vec![0u32; w as usize * h as usize];
             if !n.read_finish(&mut display) {
                 return Err("the display did not read back".into());
@@ -1170,12 +1439,19 @@ impl Backend for DeviceBackend {
         let mut surfaces = Vec::with_capacity(p.surfaces.len());
         for (i, s) in p.surfaces.iter().enumerate() {
             surfaces.push(if surface_used(s) {
-                Some(n.surface_read(i as u32).map_err(|e| format!("surface {i}: {e}"))?)
+                Some(
+                    n.surface_read(i as u32)
+                        .map_err(|e| format!("surface {i}: {e}"))?,
+                )
             } else {
                 None
             });
         }
-        Ok(Drawn { result, display, surfaces })
+        Ok(Drawn {
+            result,
+            display,
+            surfaces,
+        })
     }
 }
 
@@ -1200,7 +1476,12 @@ struct Options {
 
 impl Default for Options {
     fn default() -> Options {
-        Options { selection: Selection::All, all: false, no_dual: false, check_only: false }
+        Options {
+            selection: Selection::All,
+            all: false,
+            no_dual: false,
+            check_only: false,
+        }
     }
 }
 
@@ -1233,12 +1514,20 @@ struct Report {
 fn last_writer(p: &PictureInput, s: i32) -> String {
     let hit = p.commands.iter().enumerate().rev().find(|(_, c)| {
         let k = &c.head;
-        matches!(k.kind, DHDR_CMD_DRAW | DHDR_CMD_COPY | DHDR_CMD_IMPORT | DHDR_CMD_ALPHA_UPLOAD)
-            && (k.target as i32 == s || (k.kind == DHDR_CMD_DRAW && k.depth as i32 == s && s >= 0))
+        matches!(
+            k.kind,
+            DHDR_CMD_DRAW | DHDR_CMD_COPY | DHDR_CMD_IMPORT | DHDR_CMD_ALPHA_UPLOAD
+        ) && (k.target as i32 == s || (k.kind == DHDR_CMD_DRAW && k.depth as i32 == s && s >= 0))
     });
     match hit {
-        Some((i, c)) => format!("last command writing there: command {i} {}", kind_name(c.head.kind)),
-        None => "no command of the picture writes there (its contents come from before the picture)".into(),
+        Some((i, c)) => format!(
+            "last command writing there: command {i} {}",
+            kind_name(c.head.kind)
+        ),
+        None => {
+            "no command of the picture writes there (its contents come from before the picture)"
+                .into()
+        }
     }
 }
 
@@ -1250,7 +1539,11 @@ fn pixel_diff(got: &[u8], want: &[u8]) -> Option<(u64, usize, u32, u32)> {
         if g != w {
             count += 1;
             if first.is_none() {
-                first = Some((i, u32::from_le_bytes(g.try_into().unwrap()), u32::from_le_bytes(w.try_into().unwrap())));
+                first = Some((
+                    i,
+                    u32::from_le_bytes(g.try_into().unwrap()),
+                    u32::from_le_bytes(w.try_into().unwrap()),
+                ));
             }
         }
     }
@@ -1266,13 +1559,27 @@ fn value_text(v: u32, depth: bool) -> String {
 }
 
 /// The differences of one picture, one line each (empty when equal).
-fn compare(p: &PictureInput, e: &Expect, d: &Drawn, inputs: &mut dyn Inputs, r: &mut Report) -> Result<Vec<String>, String> {
+fn compare(
+    p: &PictureInput,
+    e: &Expect,
+    d: &Drawn,
+    inputs: &mut dyn Inputs,
+    r: &mut Report,
+) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     let (g, w) = (&d.result, &e.result);
     let fields: [(&str, u64, u64); 11] = [
         ("shown", g.shown as u64, w.shown as u64),
-        ("display_width", g.display_width as u64, w.display_width as u64),
-        ("display_height", g.display_height as u64, w.display_height as u64),
+        (
+            "display_width",
+            g.display_width as u64,
+            w.display_width as u64,
+        ),
+        (
+            "display_height",
+            g.display_height as u64,
+            w.display_height as u64,
+        ),
         ("draws", g.draws, w.draws),
         ("self_copies", g.self_copies, w.self_copies),
         ("self_copy_px", g.self_copy_px, w.self_copy_px),
@@ -1282,8 +1589,11 @@ fn compare(p: &PictureInput, e: &Expect, d: &Drawn, inputs: &mut dyn Inputs, r: 
         ("import_px", g.import_px, w.import_px),
         ("two_pass_draws", g.two_pass_draws, w.two_pass_draws),
     ];
-    let diffs: Vec<String> =
-        fields.iter().filter(|f| f.1 != f.2).map(|f| format!("{} got {} want {}", f.0, f.1, f.2)).collect();
+    let diffs: Vec<String> = fields
+        .iter()
+        .filter(|f| f.1 != f.2)
+        .map(|f| format!("{} got {} want {}", f.0, f.1, f.2))
+        .collect();
     if !diffs.is_empty() {
         out.push(format!("result: {}", diffs.join(", ")));
     }
@@ -1291,12 +1601,22 @@ fn compare(p: &PictureInput, e: &Expect, d: &Drawn, inputs: &mut dyn Inputs, r: 
         let got = word_bytes(&d.display);
         r.pixels += w.display_width as u64 * w.display_height as u64;
         if got.len() != e.display.len() {
-            out.push(format!("display: {} pixels read back, the trace has {}x{}", d.display.len(),
-                             w.display_width, w.display_height));
+            out.push(format!(
+                "display: {} pixels read back, the trace has {}x{}",
+                d.display.len(),
+                w.display_width,
+                w.display_height
+            ));
         } else if let Some((n, i, gv, wv)) = pixel_diff(&got, &e.display) {
             let width = w.display_width.max(1) as usize;
-            out.push(format!("display: {n} pixels differ; first at ({}, {}): got {} want {}; {}", i % width, i / width,
-                             value_text(gv, false), value_text(wv, false), last_writer(p, p.head.display_surface)));
+            out.push(format!(
+                "display: {n} pixels differ; first at ({}, {}): got {} want {}; {}",
+                i % width,
+                i / width,
+                value_text(gv, false),
+                value_text(wv, false),
+                last_writer(p, p.head.display_surface)
+            ));
         }
     }
     for (i, s) in p.surfaces.iter().enumerate() {
@@ -1308,9 +1628,17 @@ fn compare(p: &PictureInput, e: &Expect, d: &Drawn, inputs: &mut dyn Inputs, r: 
         let depth = s.depth != 0;
         let kind = if depth { "depth" } else { "colour" };
         match d.surfaces.get(i).and_then(|x| x.as_ref()) {
-            None => out.push(format!("surface {i} ({kind} {}x{}): not read back", s.size[0], s.size[1])),
-            Some(got) if got.len() != want.len() => out.push(format!("surface {i} ({kind} {}x{}): {} bytes read back, not {}",
-                                                                      s.size[0], s.size[1], got.len(), want.len())),
+            None => out.push(format!(
+                "surface {i} ({kind} {}x{}): not read back",
+                s.size[0], s.size[1]
+            )),
+            Some(got) if got.len() != want.len() => out.push(format!(
+                "surface {i} ({kind} {}x{}): {} bytes read back, not {}",
+                s.size[0],
+                s.size[1],
+                got.len(),
+                want.len()
+            )),
             Some(got) => {
                 if let Some((n, k, gv, wv)) = pixel_diff(got, &want) {
                     let width = s.size[0] as usize;
@@ -1331,8 +1659,16 @@ macro_rules! say {
 type MakeBackend<'a> = dyn FnMut(&Header) -> Result<Box<dyn Backend>, String> + 'a;
 
 /// Checks, then replays and compares (NTRACE.md "Replay rule").
-fn run<R: Read + Seek>(src: R, opt: &Options, make: &mut MakeBackend, out: &mut dyn Write) -> Report {
-    let mut rep = Report { exit: EXIT_FAIL, ..Default::default() };
+fn run<R: Read + Seek>(
+    src: R,
+    opt: &Options,
+    make: &mut MakeBackend,
+    out: &mut dyn Write,
+) -> Report {
+    let mut rep = Report {
+        exit: EXIT_FAIL,
+        ..Default::default()
+    };
     let mut t = match Trace::open(src) {
         Ok(t) => t,
         Err(Problem::Invalid(m)) => {
@@ -1346,13 +1682,29 @@ fn run<R: Read + Seek>(src: R, opt: &Options, make: &mut MakeBackend, out: &mut 
         }
     };
     let h = t.header.clone();
-    say!(out, "native_replay: trace version {} ({}-byte header) from \"{}\", recorder {}, {}{}", h.version, h.header_bytes,
-         h.source, h.recorder_sha,
-         identity_text(&h.identity(), &h.adapter), if h.dual() { ", DUAL" } else { ", no DUAL" });
-    say!(out, "native_replay: {} pictures, {} textures, {} blobs, {} records, integrity checked",
-         t.pictures.len(), t.textures.len(), t.blobs.len(), t.records);
+    say!(
+        out,
+        "native_replay: trace version {} ({}-byte header) from \"{}\", recorder {}, {}{}",
+        h.version,
+        h.header_bytes,
+        h.source,
+        h.recorder_sha,
+        identity_text(&h.identity(), &h.adapter),
+        if h.dual() { ", DUAL" } else { ", no DUAL" }
+    );
+    say!(
+        out,
+        "native_replay: {} pictures, {} textures, {} blobs, {} records, integrity checked",
+        t.pictures.len(),
+        t.textures.len(),
+        t.blobs.len(),
+        t.records
+    );
     if opt.check_only {
-        say!(out, "native_replay: --check: the trace is valid; no picture was replayed or compared");
+        say!(
+            out,
+            "native_replay: --check: the trace is valid; no picture was replayed or compared"
+        );
         rep.exit = EXIT_PASS;
         return rep;
     }
@@ -1361,15 +1713,24 @@ fn run<R: Read + Seek>(src: R, opt: &Options, make: &mut MakeBackend, out: &mut 
         rep.exit = EXIT_REFUSED;
         return rep;
     }
-    let chosen: Vec<usize> = (0..t.pictures.len()).filter(|&i| selected(&t.pictures[i], opt.selection)).collect();
+    let chosen: Vec<usize> = (0..t.pictures.len())
+        .filter(|&i| selected(&t.pictures[i], opt.selection))
+        .collect();
     if chosen.is_empty() {
-        say!(out, "native_replay: FAIL compared 0 pictures: the selection {:?} matches no picture", opt.selection);
+        say!(
+            out,
+            "native_replay: FAIL compared 0 pictures: the selection {:?} matches no picture",
+            opt.selection
+        );
         return rep;
     }
     let mut b = match make(&h) {
         Ok(b) => b,
         Err(e) => {
-            say!(out, "native_replay: REFUSED: no replay device as the trace needs: {e}");
+            say!(
+                out,
+                "native_replay: REFUSED: no replay device as the trace needs: {e}"
+            );
             rep.exit = EXIT_REFUSED;
             return rep;
         }
@@ -1378,7 +1739,11 @@ fn run<R: Read + Seek>(src: R, opt: &Options, make: &mut MakeBackend, out: &mut 
     if id != h.identity() {
         say!(out, "native_replay: REFUSED: the replay adapter differs from the trace's (native pictures are compared \
                    at 0 differing pixels, which holds for one adapter and driver)");
-        say!(out, "  trace:  {}", identity_text(&h.identity(), &h.adapter));
+        say!(
+            out,
+            "  trace:  {}",
+            identity_text(&h.identity(), &h.adapter)
+        );
         say!(out, "  replay: {}", identity_text(&id, &b.adapter_name()));
         rep.exit = EXIT_REFUSED;
         return rep;
@@ -1388,9 +1753,19 @@ fn run<R: Read + Seek>(src: R, opt: &Options, make: &mut MakeBackend, out: &mut 
         rep.exit = EXIT_REFUSED;
         return rep;
     }
-    say!(out, "native_replay: replaying {} of {} pictures on {}", chosen.len(), t.pictures.len(), b.adapter_name());
+    say!(
+        out,
+        "native_replay: replaying {} of {} pictures on {}",
+        chosen.len(),
+        t.pictures.len(),
+        b.adapter_name()
+    );
     for &i in &chosen {
-        let (index, label, field) = (t.pictures[i].index, t.pictures[i].label.clone(), t.pictures[i].field);
+        let (index, label, field) = (
+            t.pictures[i].index,
+            t.pictures[i].label.clone(),
+            t.pictures[i].field,
+        );
         let name = format!("picture {index} \"{label}\" (field {field})");
         let lines = match t.load(i) {
             Err(e) => vec![format!("the trace could not be read: {e}")],
@@ -1418,9 +1793,20 @@ fn run<R: Read + Seek>(src: R, opt: &Options, make: &mut MakeBackend, out: &mut 
             }
         }
     }
-    say!(out, "native_replay: compared {} pictures ({} display pixels, {} surfaces)", rep.compared, rep.pixels, rep.surfaces);
+    say!(
+        out,
+        "native_replay: compared {} pictures ({} display pixels, {} surfaces)",
+        rep.compared,
+        rep.pixels,
+        rep.surfaces
+    );
     if rep.failed > 0 {
-        say!(out, "native_replay: FAIL {} of {} pictures differ", rep.failed, rep.compared);
+        say!(
+            out,
+            "native_replay: FAIL {} of {} pictures differ",
+            rep.failed,
+            rep.compared
+        );
     } else {
         rep.exit = EXIT_PASS;
     }
@@ -1467,13 +1853,21 @@ fn parse_args(args: &[String]) -> Result<(String, Options, Option<String>), Stri
         match a.as_str() {
             "--picture" => {
                 let n = it.next().ok_or("--picture needs a number")?;
-                choose(Selection::Picture(n.parse().map_err(|_| format!("--picture {n}: not a number"))?))?;
+                choose(Selection::Picture(
+                    n.parse()
+                        .map_err(|_| format!("--picture {n}: not a number"))?,
+                ))?;
             }
             "--only" => match it.next().map(|s| s.as_str()) {
                 Some("no-draw") => choose(Selection::NoDraw)?,
                 Some("convert-scenes") => choose(Selection::ConvertScenes)?,
                 Some("draw") => choose(Selection::Draw)?,
-                o => return Err(format!("--only {}: not no-draw, convert-scenes or draw", o.unwrap_or(""))),
+                o => {
+                    return Err(format!(
+                        "--only {}: not no-draw, convert-scenes or draw",
+                        o.unwrap_or("")
+                    ))
+                }
             },
             "--all" => opt.all = true,
             "--no-dual" => opt.no_dual = true,
@@ -1503,7 +1897,13 @@ fn replay_file(path: &str, opt: &Options, dxc: Option<String>) -> i32 {
     };
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    run(BufReader::with_capacity(1 << 20, f), opt, &mut make, &mut out).exit
+    run(
+        BufReader::with_capacity(1 << 20, f),
+        opt,
+        &mut make,
+        &mut out,
+    )
+    .exit
 }
 
 // ------------------------------------------------------------------------------------ selftest
@@ -1548,16 +1948,27 @@ mod selftest {
         fn dual_source(&self) -> bool {
             self.dual
         }
-        fn draw(&mut self, p: &PictureInput, _dual: bool, inputs: &mut dyn Inputs) -> Result<Drawn, String> {
+        fn draw(
+            &mut self,
+            p: &PictureInput,
+            _dual: bool,
+            inputs: &mut dyn Inputs,
+        ) -> Result<Drawn, String> {
             let mut s: Vec<Option<Vec<u8>>> = Vec::new();
             for (i, info) in p.surfaces.iter().enumerate() {
-                s.push(if surface_used(info) { Some(inputs.blob(p.before[i])?) } else { None });
+                s.push(if surface_used(info) {
+                    Some(inputs.blob(p.before[i])?)
+                } else {
+                    None
+                });
             }
             let size = |i: i16| p.surfaces.get(i as usize).map(|x| (x.size[0], x.size[1]));
             let mut r = DhdrPictureResult::default();
             for c in &p.commands {
                 let k = &c.head;
-                let Some((w, h)) = size(k.target) else { continue };
+                let Some((w, h)) = size(k.target) else {
+                    continue;
+                };
                 match k.kind {
                     DHDR_CMD_IMPORT => {
                         r.imports += 1;
@@ -1565,7 +1976,14 @@ mod selftest {
                         if let Some(t) = s[k.target as usize].as_mut() {
                             for y in 0..k.h.max(0) {
                                 for x in 0..k.w.max(0) {
-                                    put(t, w, h, k.x + x, k.y + y, c.pixels[(y * k.w + x) as usize]);
+                                    put(
+                                        t,
+                                        w,
+                                        h,
+                                        k.x + x,
+                                        k.y + y,
+                                        c.pixels[(y * k.w + x) as usize],
+                                    );
                                 }
                             }
                         }
@@ -1579,8 +1997,12 @@ mod selftest {
                             r.copies += 1;
                             r.copy_px += px;
                         }
-                        let Some((sw, sh)) = size(k.source) else { continue };
-                        let Some(from) = s[k.source as usize].clone() else { continue };
+                        let Some((sw, sh)) = size(k.source) else {
+                            continue;
+                        };
+                        let Some(from) = s[k.source as usize].clone() else {
+                            continue;
+                        };
                         if let Some(t) = s[k.target as usize].as_mut() {
                             for y in 0..k.h.max(0) {
                                 for x in 0..k.w.max(0) {
@@ -1608,12 +2030,18 @@ mod selftest {
             if hd.movie_on == 1 {
                 (r.shown, r.display_width, r.display_height) = (1, hd.movie_width, hd.movie_height);
                 display = p.movie.clone();
-            } else if let Some(Some(d)) = (hd.display_surface >= 0).then(|| s.get(hd.display_surface as usize).cloned().flatten()) {
+            } else if let Some(Some(d)) = (hd.display_surface >= 0)
+                .then(|| s.get(hd.display_surface as usize).cloned().flatten())
+            {
                 let info = &p.surfaces[hd.display_surface as usize];
                 (r.shown, r.display_width, r.display_height) = (1, info.size[0], info.size[1]);
                 display = words(&d);
             }
-            Ok(Drawn { result: r, display, surfaces: s })
+            Ok(Drawn {
+                result: r,
+                display,
+                surfaces: s,
+            })
         }
     }
 
@@ -1622,7 +2050,16 @@ mod selftest {
         let total = (fixed + 3) & !3;
         let mut b = Vec::with_capacity(total);
         b.extend_from_slice(MAGIC);
-        for v in [h.version, total as u32, h.flags, h.api, h.vendor_id, h.device_id, h.compiler, h.fallback_adapter] {
+        for v in [
+            h.version,
+            total as u32,
+            h.flags,
+            h.api,
+            h.vendor_id,
+            h.device_id,
+            h.compiler,
+            h.fallback_adapter,
+        ] {
             b.extend_from_slice(&v.to_le_bytes());
         }
         b.extend_from_slice(&h.driver_version.to_le_bytes());
@@ -1687,16 +2124,26 @@ mod selftest {
 
     impl Inputs for Gen {
         fn blob(&mut self, id: u32) -> Result<Vec<u8>, String> {
-            self.blobs.get(id as usize).map(|b| b.3.clone()).ok_or(format!("blob {id}"))
+            self.blobs
+                .get(id as usize)
+                .map(|b| b.3.clone())
+                .ok_or(format!("blob {id}"))
         }
         fn texture(&mut self, id: u32) -> Result<(TexMeta, Vec<u8>), String> {
-            self.textures.get(id as usize).cloned().ok_or(format!("texture {id}"))
+            self.textures
+                .get(id as usize)
+                .cloned()
+                .ok_or(format!("texture {id}"))
         }
     }
 
     impl Gen {
         fn blob(&mut self, format: u32, w: u32, h: u32, bytes: Vec<u8>) -> u32 {
-            if let Some(i) = self.blobs.iter().position(|b| b.0 == format && b.1 == w && b.2 == h && b.3 == bytes) {
+            if let Some(i) = self
+                .blobs
+                .iter()
+                .position(|b| b.0 == format && b.1 == w && b.2 == h && b.3 == bytes)
+            {
                 return i as u32;
             }
             let id = self.blobs.len() as u32;
@@ -1719,7 +2166,17 @@ mod selftest {
             p.extend_from_slice(&bytes);
             self.records.push((T_TEXTURE, p));
             let bytes_len = bytes.len() as u64;
-            self.textures.push((TexMeta { kind, w, h, levels, data: 0, bytes: bytes_len }, bytes));
+            self.textures.push((
+                TexMeta {
+                    kind,
+                    w,
+                    h,
+                    levels,
+                    data: 0,
+                    bytes: bytes_len,
+                },
+                bytes,
+            ));
             id
         }
 
@@ -1735,8 +2192,16 @@ mod selftest {
             for v in h.display {
                 b.extend_from_slice(&v.to_le_bytes());
             }
-            for v in [h.movie_on, h.movie_width, h.movie_height, p.vertices.len() as u32, p.commands.len() as u32,
-                      p.converts.len() as u32, p.surfaces.len() as u32, h.label.len() as u32] {
+            for v in [
+                h.movie_on,
+                h.movie_width,
+                h.movie_height,
+                p.vertices.len() as u32,
+                p.commands.len() as u32,
+                p.converts.len() as u32,
+                p.surfaces.len() as u32,
+                h.label.len() as u32,
+            ] {
                 b.extend_from_slice(&v.to_le_bytes());
             }
             b.extend_from_slice(h.label.as_bytes());
@@ -1778,8 +2243,13 @@ mod selftest {
                 b.extend_from_slice(&word_bytes(&p.movie));
                 self.records.push((T_MOVIE, b));
             }
-            let mut m = Model { identity: Identity::default(), dual: true };
-            let d = m.draw(p, false, self).expect("the model draws every selftest picture");
+            let mut m = Model {
+                identity: Identity::default(),
+                dual: true,
+            };
+            let d = m
+                .draw(p, false, self)
+                .expect("the model draws every selftest picture");
             let mut after = Vec::new();
             for (s, c) in p.surfaces.iter().zip(&d.surfaces) {
                 after.push(match c {
@@ -1815,11 +2285,24 @@ mod selftest {
     }
 
     fn pattern(seed: u32, n: usize) -> Vec<u8> {
-        (0..n as u32).flat_map(|i| (i.wrapping_mul(0x9E37_79B9) ^ seed.wrapping_mul(0x85EB_CA6B)).to_le_bytes()).collect()
+        (0..n as u32)
+            .flat_map(|i| {
+                (i.wrapping_mul(0x9E37_79B9) ^ seed.wrapping_mul(0x85EB_CA6B)).to_le_bytes()
+            })
+            .collect()
     }
 
     fn colour(w: u32, h: u32) -> DhdrSurfaceInfo {
-        DhdrSurfaceInfo { page: 0, bw: 1, wide: 0, depth: 0, zpsm: 0, scale: 1, size: [w, h], extent: [w, h] }
+        DhdrSurfaceInfo {
+            page: 0,
+            bw: 1,
+            wide: 0,
+            depth: 0,
+            zpsm: 0,
+            scale: 1,
+            size: [w, h],
+            extent: [w, h],
+        }
     }
 
     fn command(kind: u8, target: i16) -> CommandRec {
@@ -1830,17 +2313,35 @@ mod selftest {
         head.texture_surface = DHDR_NO_INDEX;
         head.convert = DHDR_NO_INDEX;
         head.source = DHDR_NO_INDEX;
-        CommandRec { head, texture: NONE, replacement: NONE, pixels: Vec::new() }
+        CommandRec {
+            head,
+            texture: NONE,
+            replacement: NONE,
+            pixels: Vec::new(),
+        }
     }
 
     fn vertex(x: f32, y: f32, rgba: u32) -> DhdrVertex {
-        DhdrVertex { x, y, z: 0.5, s: 0.0, t: 0.0, q: 1.0, fog: 0.0, rgba }
+        DhdrVertex {
+            x,
+            y,
+            z: 0.5,
+            s: 0.0,
+            t: 0.0,
+            q: 1.0,
+            fog: 0.0,
+            rgba,
+        }
     }
 
     /// Three pictures (indices 0, 2, 3): IMPORT only (no draw); DRAW + self COPY with a texture;
     /// a DRAW with a conversion and a replacement, and a movie frame shown.
     pub(super) fn trace(h: &Header) -> Vec<u8> {
-        let mut g = Gen { records: Vec::new(), blobs: Vec::new(), textures: Vec::new() };
+        let mut g = Gen {
+            records: Vec::new(),
+            blobs: Vec::new(),
+            textures: Vec::new(),
+        };
         let mut depth = colour(4, 4);
         depth.depth = 1;
         depth.zpsm = 1;
@@ -1851,7 +2352,14 @@ mod selftest {
         (imp.head.x, imp.head.y, imp.head.w, imp.head.h) = (1, 1, 3, 2);
         imp.pixels = (0..6).map(|i| 0xAA00_0000 | i).collect();
         let p0 = PictureInput {
-            head: PicHead { index: 0, field: 100, scale: 1, display_surface: 0, label: "import".into(), ..Default::default() },
+            head: PicHead {
+                index: 0,
+                field: 100,
+                scale: 1,
+                display_surface: 0,
+                label: "import".into(),
+                ..Default::default()
+            },
             surfaces: vec![colour(8, 4), DhdrSurfaceInfo::default(), depth],
             before: vec![a, NONE, z],
             commands: vec![imp],
@@ -1865,12 +2373,31 @@ mod selftest {
         (draw.head.depth, draw.head.first, draw.head.count) = (2, 0, 3);
         draw.texture = t0;
         let mut copy = command(DHDR_CMD_COPY, 0);
-        (copy.head.source, copy.head.sx, copy.head.sy, copy.head.w, copy.head.h, copy.head.x, copy.head.y) = (0, 0, 0, 2, 1, 4, 2);
+        (
+            copy.head.source,
+            copy.head.sx,
+            copy.head.sy,
+            copy.head.w,
+            copy.head.h,
+            copy.head.x,
+            copy.head.y,
+        ) = (0, 0, 0, 2, 1, 4, 2);
         let p1 = PictureInput {
-            head: PicHead { index: 2, field: 101, scale: 1, display_surface: 0, label: "draw".into(), ..Default::default() },
+            head: PicHead {
+                index: 2,
+                field: 101,
+                scale: 1,
+                display_surface: 0,
+                label: "draw".into(),
+                ..Default::default()
+            },
             surfaces: vec![colour(8, 4), DhdrSurfaceInfo::default(), depth],
             before: vec![b, NONE, z],
-            vertices: vec![vertex(0.0, 0.0, 0xFF00_00FF), vertex(2.0, 1.0, 0xFF00_FF00), vertex(7.0, 3.0, 0xFFFF_0000)],
+            vertices: vec![
+                vertex(0.0, 0.0, 0xFF00_00FF),
+                vertex(2.0, 1.0, 0xFF00_FF00),
+                vertex(7.0, 3.0, 0xFFFF_0000),
+            ],
             commands: vec![draw, copy],
             ..Default::default()
         };
@@ -1887,12 +2414,25 @@ mod selftest {
         (cd.head.convert, cd.head.first, cd.head.count) = (0, 0, 2);
         cd.replacement = t1;
         let p2 = PictureInput {
-            head: PicHead { index: 3, field: 102, scale: 1, display_surface: 1, movie_on: 1, movie_width: 2, movie_height: 2,
-                            label: "convert".into(), ..Default::default() },
+            head: PicHead {
+                index: 3,
+                field: 102,
+                scale: 1,
+                display_surface: 1,
+                movie_on: 1,
+                movie_width: 2,
+                movie_height: 2,
+                label: "convert".into(),
+                ..Default::default()
+            },
             surfaces: vec![colour(8, 4), colour(4, 4)],
             before: vec![c0, c1],
             vertices: vec![vertex(1.0, 1.0, 0x1122_3344), vertex(3.0, 2.0, 0x5566_7788)],
-            converts: vec![ConvertRec { surface: [0, -1, -1, -1], constants: conv, base: t0 }],
+            converts: vec![ConvertRec {
+                surface: [0, -1, -1, -1],
+                constants: conv,
+                base: t0,
+            }],
             commands: vec![cd],
             movie: vec![0x0102_0304, 0x0506_0708, 0x090A_0B0C, 0x0D0E_0F10],
         };
@@ -1901,7 +2441,12 @@ mod selftest {
     }
 
     fn nth(recs: &[(u32, Vec<u8>)], tag: u32, n: usize) -> usize {
-        recs.iter().enumerate().filter(|r| r.1 .0 == tag).nth(n).expect("record").0
+        recs.iter()
+            .enumerate()
+            .filter(|r| r.1 .0 == tag)
+            .nth(n)
+            .expect("record")
+            .0
     }
 
     struct Case {
@@ -1924,8 +2469,16 @@ mod selftest {
         let base = trace(&h);
         let ident = h.identity();
         let case = |name, trace: Vec<u8>, exit| Case {
-            name, trace, opt: Options::default(), model: ident.clone(), dual: false, exit, drawn: None,
-            compared: None, failed: None, says: Vec::new(),
+            name,
+            trace,
+            opt: Options::default(),
+            model: ident.clone(),
+            dual: false,
+            exit,
+            drawn: None,
+            compared: None,
+            failed: None,
+            says: Vec::new(),
         };
         let mutate = |f: &dyn Fn(&mut Vec<(u32, Vec<u8>)>)| {
             let (hb, mut recs) = split(&base);
@@ -1943,8 +2496,12 @@ mod selftest {
         c.opt.check_only = true;
         (c.drawn, c.says) = (Some(0), vec!["no picture was replayed"]);
         cases.push(c);
-        for (name, sel, n) in [("only no-draw", Selection::NoDraw, 1), ("only draw", Selection::Draw, 2),
-                               ("only convert-scenes", Selection::ConvertScenes, 1), ("picture 3", Selection::Picture(3), 1)] {
+        for (name, sel, n) in [
+            ("only no-draw", Selection::NoDraw, 1),
+            ("only draw", Selection::Draw, 2),
+            ("only convert-scenes", Selection::ConvertScenes, 1),
+            ("picture 3", Selection::Picture(3), 1),
+        ] {
             let mut c = case(name, base.clone(), EXIT_PASS);
             c.opt.selection = sel;
             (c.drawn, c.compared) = (Some(n), Some(n));
@@ -1962,8 +2519,12 @@ mod selftest {
         });
         let mut c = case("mutated display fails", display, EXIT_FAIL);
         (c.compared, c.failed) = (Some(2), Some(1));
-        c.says = vec!["FAIL picture 2 \"draw\"", "display: 1 pixels differ; first at (1, 1)", "command 1 COPY",
-                      "stopped at the first differing picture"];
+        c.says = vec![
+            "FAIL picture 2 \"draw\"",
+            "display: 1 pixels differ; first at (1, 1)",
+            "command 1 COPY",
+            "stopped at the first differing picture",
+        ];
         cases.push(c);
         let counter = mutate(&|r| {
             let i = nth(r, T_RESULT, 2);
@@ -1979,8 +2540,12 @@ mod selftest {
         });
         let mut c = case("mutated input pixel fails", input, EXIT_FAIL);
         (c.compared, c.failed) = (Some(1), Some(1));
-        c.says = vec!["FAIL picture 0 \"import\"", "surface 0 (colour 8x4): 1 pixels differ; first at (1, 1)",
-                      "command 0 IMPORT", "display: 1 pixels differ"];
+        c.says = vec![
+            "FAIL picture 0 \"import\"",
+            "surface 0 (colour 8x4): 1 pixels differ; first at (1, 1)",
+            "command 0 IMPORT",
+            "display: 1 pixels differ",
+        ];
         cases.push(c);
         let after = mutate(&|r| {
             // A blob only an `after` refers to: picture 3's surface 1.
@@ -1988,12 +2553,19 @@ mod selftest {
             let p = &r[res].1;
             let n = p.len();
             let id = u32::from_le_bytes(p[n - 4..].try_into().unwrap());
-            let i = r.iter().position(|x| x.0 == T_BLOB && x.1[0..4] == id.to_le_bytes()).unwrap();
+            let i = r
+                .iter()
+                .position(|x| x.0 == T_BLOB && x.1[0..4] == id.to_le_bytes())
+                .unwrap();
             r[i].1[16 + 4 * 6] ^= 0x80;
         });
         let mut c = case("mutated after surface fails", after, EXIT_FAIL);
         c.failed = Some(1);
-        c.says = vec!["FAIL picture 3", "surface 1 (colour 4x4): 1 pixels differ; first at (2, 1)", "command 0 DRAW"];
+        c.says = vec![
+            "FAIL picture 3",
+            "surface 1 (colour 4x4): 1 pixels differ; first at (2, 1)",
+            "command 0 DRAW",
+        ];
         cases.push(c);
         let two = mutate(&|r| {
             let i = nth(r, T_RESULT, 1);
@@ -2039,10 +2611,18 @@ mod selftest {
             let i = nth(r, T_PICTURE, 1);
             r[i].1[88] += 1; // command_count
         });
-        let mut c = case("count disagreeing with PICTURE fails", wrong_count, EXIT_FAIL);
+        let mut c = case(
+            "count disagreeing with PICTURE fails",
+            wrong_count,
+            EXIT_FAIL,
+        );
         (c.drawn, c.says) = (Some(0), vec!["PICTURE says"]);
         cases.push(c);
-        let mut c = case("truncated trace fails", base[..base.len() - 10].to_vec(), EXIT_FAIL);
+        let mut c = case(
+            "truncated trace fails",
+            base[..base.len() - 10].to_vec(),
+            EXIT_FAIL,
+        );
         c.drawn = Some(0);
         cases.push(c);
         let mut longer = base.clone();
@@ -2068,21 +2648,38 @@ mod selftest {
             ("driver mismatch refused", |i| i.driver_version += 1),
             ("API mismatch refused", |i| i.api = 2),
             ("compiler mismatch refused", |i| i.compiler = 1),
-            ("fallback adapter mismatch refused", |i| i.fallback_adapter = 1),
+            ("fallback adapter mismatch refused", |i| {
+                i.fallback_adapter = 1
+            }),
         ];
         for (name, f) in tweaks {
             let mut c = case(name, base.clone(), EXIT_REFUSED);
             f(&mut c.model);
-            (c.drawn, c.says) = (Some(0), vec!["REFUSED: the replay adapter differs", "  trace:  ", "  replay: "]);
+            (c.drawn, c.says) = (
+                Some(0),
+                vec![
+                    "REFUSED: the replay adapter differs",
+                    "  trace:  ",
+                    "  replay: ",
+                ],
+            );
             cases.push(c);
         }
         let mut hd = h.clone();
         hd.flags = 1;
         let dual = trace(&hd);
-        let mut c = case("DUAL trace without dual-source refused", dual.clone(), EXIT_REFUSED);
+        let mut c = case(
+            "DUAL trace without dual-source refused",
+            dual.clone(),
+            EXIT_REFUSED,
+        );
         (c.drawn, c.says) = (Some(0), vec!["no dual-source blending"]);
         cases.push(c);
-        let mut c = case("DUAL trace with dual-source passes", dual.clone(), EXIT_PASS);
+        let mut c = case(
+            "DUAL trace with dual-source passes",
+            dual.clone(),
+            EXIT_PASS,
+        );
         (c.dual, c.drawn) = (true, Some(3));
         cases.push(c);
         let mut c = case("--no-dual on a DUAL trace refused", dual, EXIT_REFUSED);
@@ -2095,7 +2692,10 @@ mod selftest {
             let mut out = Vec::new();
             let (model, dual) = (c.model.clone(), c.dual);
             let mut make = |_: &Header| -> Result<Box<dyn Backend>, String> {
-                Ok(Box::new(Model { identity: model.clone(), dual }) as Box<dyn Backend>)
+                Ok(Box::new(Model {
+                    identity: model.clone(),
+                    dual,
+                }) as Box<dyn Backend>)
             };
             let r = run(Cursor::new(c.trace.clone()), &c.opt, &mut make, &mut out);
             let text = String::from_utf8_lossy(&out).into_owned();
@@ -2103,7 +2703,11 @@ mod selftest {
             if r.exit != c.exit {
                 wrong.push(format!("exit {} (want {})", r.exit, c.exit));
             }
-            for (what, got, want) in [("drawn", r.drawn, c.drawn), ("compared", r.compared, c.compared), ("failed", r.failed, c.failed)] {
+            for (what, got, want) in [
+                ("drawn", r.drawn, c.drawn),
+                ("compared", r.compared, c.compared),
+                ("failed", r.failed, c.failed),
+            ] {
                 if let Some(w) = want {
                     if got != w {
                         wrong.push(format!("{what} {got} (want {w})"));

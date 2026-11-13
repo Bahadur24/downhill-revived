@@ -92,7 +92,10 @@ pub fn spec(flags: u32, wrap: [u32; 2], atst: u32, sized: bool, unit_alpha: bool
     // Each part with its "given" bit (31 flags, 30 CLAMP modes, 29 alpha test).
     let mut bits = 1 << 31 | 1 << 30 | 1 << 29 | f;
     if textured {
-        bits |= (wrap[0] & 3) << 12 | (wrap[1] & 3) << 14 | (sized as u32) << 19 | (unit_alpha as u32) << 20;
+        bits |= (wrap[0] & 3) << 12
+            | (wrap[1] & 3) << 14
+            | (sized as u32) << 19
+            | (unit_alpha as u32) << 20;
     }
     if f & 64 != 0 {
         bits |= (atst & 7) << 16;
@@ -118,14 +121,26 @@ pub struct PipelineDesc {
 pub fn blend_factor(d3d: u32, dual: bool) -> wgpu::BlendFactor {
     use wgpu::BlendFactor as F;
     match d3d {
-        1 => F::Zero,                                                      // D3D11_BLEND_ZERO
-        2 => F::One,                                                       // D3D11_BLEND_ONE
-        5 => if dual { F::Src1Alpha } else { F::SrcAlpha },                // D3D11_BLEND_SRC_ALPHA
-        6 => if dual { F::OneMinusSrc1Alpha } else { F::OneMinusSrcAlpha }, // D3D11_BLEND_INV_SRC_ALPHA
-        7 => F::DstAlpha,                                                  // D3D11_BLEND_DEST_ALPHA
-        8 => F::OneMinusDstAlpha,                                          // D3D11_BLEND_INV_DEST_ALPHA
-        14 => F::Constant,                                                 // D3D11_BLEND_BLEND_FACTOR
-        15 => F::OneMinusConstant,                                         // D3D11_BLEND_INV_BLEND_FACTOR
+        1 => F::Zero, // D3D11_BLEND_ZERO
+        2 => F::One,  // D3D11_BLEND_ONE
+        5 => {
+            if dual {
+                F::Src1Alpha
+            } else {
+                F::SrcAlpha
+            }
+        } // D3D11_BLEND_SRC_ALPHA
+        6 => {
+            if dual {
+                F::OneMinusSrc1Alpha
+            } else {
+                F::OneMinusSrcAlpha
+            }
+        } // D3D11_BLEND_INV_SRC_ALPHA
+        7 => F::DstAlpha, // D3D11_BLEND_DEST_ALPHA
+        8 => F::OneMinusDstAlpha, // D3D11_BLEND_INV_DEST_ALPHA
+        14 => F::Constant, // D3D11_BLEND_BLEND_FACTOR
+        15 => F::OneMinusConstant, // D3D11_BLEND_INV_BLEND_FACTOR
         _ => F::One,
     }
 }
@@ -136,12 +151,12 @@ pub fn blend_factor(d3d: u32, dual: bool) -> wgpu::BlendFactor {
 pub fn blend_operation(d3d: u32) -> Option<wgpu::BlendOperation> {
     use wgpu::BlendOperation as O;
     match d3d {
-        0 => Some(O::Add),             // WGPUBlendOperation_Undefined: wgpu-native's default, Add
-        1 => Some(O::Add),             // D3D11_BLEND_OP_ADD
-        2 => Some(O::Subtract),        // D3D11_BLEND_OP_SUBTRACT
+        0 => Some(O::Add),      // WGPUBlendOperation_Undefined: wgpu-native's default, Add
+        1 => Some(O::Add),      // D3D11_BLEND_OP_ADD
+        2 => Some(O::Subtract), // D3D11_BLEND_OP_SUBTRACT
         3 => Some(O::ReverseSubtract), // D3D11_BLEND_OP_REV_SUBTRACT
-        4 => Some(O::Min),             // D3D11_BLEND_OP_MIN
-        5 => Some(O::Max),             // D3D11_BLEND_OP_MAX
+        4 => Some(O::Min),      // D3D11_BLEND_OP_MIN
+        5 => Some(O::Max),      // D3D11_BLEND_OP_MAX
         _ => None,
     }
 }
@@ -154,7 +169,11 @@ pub fn blend_operation(d3d: u32) -> Option<wgpu::BlendOperation> {
 /// Rogue's driver (1.13), which blends in the fragment program, does not create that pipeline
 /// (finding 176). A draw left with no channel and no Z write draws nothing (`render.rs` skips it).
 pub fn without_kept_colour(blend_key: u32, mask: u32) -> (u32, u32) {
-    let (src, dst, op) = (blend_key >> 1 & 31, blend_key >> 6 & 31, blend_key >> 11 & 7);
+    let (src, dst, op) = (
+        blend_key >> 1 & 31,
+        blend_key >> 6 & 31,
+        blend_key >> 11 & 7,
+    );
     // D3D11 ZERO (1) and ONE (2); operations 0 and 1 are Add, 3 ReverseSubtract (blend_operation).
     if blend_key & 1 != 0 && src == 1 && dst == 2 && matches!(op, 0 | 1 | 3) {
         (0, mask & 8)
@@ -222,8 +241,9 @@ pub fn describe(key: u32) -> Result<PipelineDesc, String> {
     let dual = variant == VARIANT_DUAL;
     let blend = if blend_key & 1 != 0 && variant != VARIANT_ALPHA_ONLY {
         let op = blend_key >> 11 & 7;
-        let operation = blend_operation(op)
-            .ok_or_else(|| format!("native pipeline {key:07X}: blend operation {op} is not one wgpu takes"))?;
+        let operation = blend_operation(op).ok_or_else(|| {
+            format!("native pipeline {key:07X}: blend operation {op} is not one wgpu takes")
+        })?;
         Some(wgpu::BlendState {
             color: wgpu::BlendComponent {
                 src_factor: blend_factor(blend_key >> 1 & 31, dual),
@@ -245,7 +265,11 @@ pub fn describe(key: u32) -> Result<PipelineDesc, String> {
         _ => "native_pixel",
     };
     Ok(PipelineDesc {
-        color: wgpu::ColorTargetState { format: wgpu::TextureFormat::Rgba8Unorm, blend, write_mask: write_mask(mask) },
+        color: wgpu::ColorTargetState {
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            blend,
+            write_mask: write_mask(mask),
+        },
         depth: (depth & 16 != 0).then(|| depth_state(depth & 8 != 0, depth_compare(depth & 7))),
         dual_module: dual,
         entry,
@@ -257,24 +281,51 @@ pub fn describe(key: u32) -> Result<PipelineDesc, String> {
 fn summary(full: u64, d: &PipelineDesc) -> String {
     let key = full as u32;
     let blend = match &d.color.blend {
-        Some(b) => format!("{:?}/{:?} {:?}", b.color.src_factor, b.color.dst_factor, b.color.operation),
+        Some(b) => format!(
+            "{:?}/{:?} {:?}",
+            b.color.src_factor, b.color.dst_factor, b.color.operation
+        ),
         None => "none".into(),
     };
     let depth = match &d.depth {
-        Some(z) => format!("{:?}{}", z.depth_compare.unwrap_or(wgpu::CompareFunction::Always),
-                           if z.depth_write_enabled == Some(true) { " write" } else { "" }),
+        Some(z) => format!(
+            "{:?}{}",
+            z.depth_compare.unwrap_or(wgpu::CompareFunction::Always),
+            if z.depth_write_enabled == Some(true) {
+                " write"
+            } else {
+                ""
+            }
+        ),
         None => "none".into(),
     };
-    format!("fs {}{} spec {:X} texel scale {}, blend {blend}, write mask {:X}, depth {depth}",
-            d.entry, if key & TEXELS != 0 { " (texels)" } else { "" }, full >> SPEC_SHIFT,
-            key >> TEXEL_SCALE_SHIFT & 15, d.color.write_mask.bits())
+    format!(
+        "fs {}{} spec {:X} texel scale {}, blend {blend}, write mask {:X}, depth {depth}",
+        d.entry,
+        if key & TEXELS != 0 { " (texels)" } else { "" },
+        full >> SPEC_SHIFT,
+        key >> TEXEL_SCALE_SHIFT & 15,
+        d.color.write_mask.bits()
+    )
 }
 
 /// The vertex layout of every draw (`DhdrVertex`, 32 bytes): position xyz, stqf, rgba bytes.
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] = [
-    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
-    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 12, shader_location: 1 },
-    wgpu::VertexAttribute { format: wgpu::VertexFormat::Uint8x4, offset: 28, shader_location: 2 },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x4,
+        offset: 12,
+        shader_location: 1,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Uint8x4,
+        offset: 28,
+        shader_location: 2,
+    },
 ];
 const _: () = assert!(std::mem::size_of::<crate::abi::DhdrVertex>() == 32);
 
@@ -292,15 +343,24 @@ struct Sources {
 
 impl Sources {
     fn of(objects: &Objects) -> Sources {
-        Sources { module: objects.module.clone(), dual_module: objects.dual_module.clone(),
-                  layout: objects.native_draw_layout.clone(), texels_layout: objects.native_texels_draw_layout.clone(),
-                  mesh_layout: objects.mesh_draw_layout.clone(),
-                  mesh_texels_layout: objects.mesh_texels_draw_layout.clone() }
+        Sources {
+            module: objects.module.clone(),
+            dual_module: objects.dual_module.clone(),
+            layout: objects.native_draw_layout.clone(),
+            texels_layout: objects.native_texels_draw_layout.clone(),
+            mesh_layout: objects.mesh_draw_layout.clone(),
+            mesh_texels_layout: objects.mesh_texels_draw_layout.clone(),
+        }
     }
 }
 
 /// Builds the pipeline of `key` (no cache, no scope).
-fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wgpu::RenderPipeline, String> {
+fn build(
+    gpu: &Gpu,
+    objects: &Sources,
+    full: u64,
+    d: &PipelineDesc,
+) -> Result<wgpu::RenderPipeline, String> {
     let key = full as u32;
     let spec = (full >> SPEC_SHIFT) as u32;
     let texels = key & TEXELS != 0;
@@ -319,10 +379,9 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
         (e, _, _) => e,
     };
     let fragment_module = if d.dual_module {
-        objects
-            .dual_module
-            .as_ref()
-            .ok_or_else(|| format!("native pipeline {key:07X}: dual-source blending is not in use"))?
+        objects.dual_module.as_ref().ok_or_else(|| {
+            format!("native pipeline {key:07X}: dual-source blending is not in use")
+        })?
     } else {
         &objects.module
     };
@@ -342,41 +401,62 @@ fn build(gpu: &Gpu, objects: &Sources, full: u64, d: &PipelineDesc) -> Result<wg
     }
     let fragment_options = wgpu::PipelineCompilationOptions {
         constants: &constants,
-        zero_initialize_workgroup_memory: crate::native::init::compilation_options().zero_initialize_workgroup_memory,
+        zero_initialize_workgroup_memory: crate::native::init::compilation_options()
+            .zero_initialize_workgroup_memory,
     };
-    Ok(gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("native draw"),
-        layout: Some(match (mesh, texels) {
-            (false, false) => &objects.layout,
-            (false, true) => &objects.texels_layout,
-            (true, false) => objects.mesh_layout.as_ref().ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
-            (true, true) => objects.mesh_texels_layout.as_ref().ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
-        }),
-        vertex: wgpu::VertexState {
-            module: &objects.module,
-            entry_point: Some(if mesh { "native_mesh_vertex" } else { "native_vertex" }),
-            compilation_options: crate::native::init::compilation_options(),
-            buffers: &[vertex],
-        },
-        // A mesh's triangles come in the winding that leaves the VU's back faces with a positive
-        // area in GS pixels (y down): clockwise in clip space (vu1_mesh.inc).
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: if mesh && key & MESH_TWO_SIDED == 0 { Some(wgpu::Face::Back) } else { None },
-            ..Default::default()
-        },
-        depth_stencil: d.depth.clone(),
-        multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-        fragment: Some(wgpu::FragmentState {
-            module: fragment_module,
-            entry_point: Some(entry),
-            compilation_options: fragment_options,
-            targets: &targets,
-        }),
-        multiview_mask: None,
-        cache: None,
-    }))
+    Ok(gpu
+        .device
+        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("native draw"),
+            layout: Some(match (mesh, texels) {
+                (false, false) => &objects.layout,
+                (false, true) => &objects.texels_layout,
+                (true, false) => objects
+                    .mesh_layout
+                    .as_ref()
+                    .ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
+                (true, true) => objects
+                    .mesh_texels_layout
+                    .as_ref()
+                    .ok_or_else(|| "gs native: no mesh layout (browser)".to_string())?,
+            }),
+            vertex: wgpu::VertexState {
+                module: &objects.module,
+                entry_point: Some(if mesh {
+                    "native_mesh_vertex"
+                } else {
+                    "native_vertex"
+                }),
+                compilation_options: crate::native::init::compilation_options(),
+                buffers: &[vertex],
+            },
+            // A mesh's triangles come in the winding that leaves the VU's back faces with a positive
+            // area in GS pixels (y down): clockwise in clip space (vu1_mesh.inc).
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: if mesh && key & MESH_TWO_SIDED == 0 {
+                    Some(wgpu::Face::Back)
+                } else {
+                    None
+                },
+                ..Default::default()
+            },
+            depth_stencil: d.depth.clone(),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: fragment_module,
+                entry_point: Some(entry),
+                compilation_options: fragment_options,
+                targets: &targets,
+            }),
+            multiview_mask: None,
+            cache: None,
+        }))
 }
 
 /// Built pipelines by key (failures are kept too, so a bad key is reported once, not per draw).
@@ -400,26 +480,38 @@ impl Worker {
     fn start(gpu: &'static Gpu, sources: Sources) -> Worker {
         let (jobs, inbox) = std::sync::mpsc::channel::<(u64, PipelineDesc)>();
         let (outbox, done) = std::sync::mpsc::channel();
-        let spawned = std::thread::Builder::new().name("dhd-pipelines".into()).spawn(move || {
-            // Ends when the Pipelines (the sender) is dropped.
-            while let Ok((key, d)) = inbox.recv() {
-                let start = std::time::Instant::now();
-                let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || build(gpu, &sources, key, &d))
+        let spawned = std::thread::Builder::new()
+            .name("dhd-pipelines".into())
+            .spawn(move || {
+                // Ends when the Pipelines (the sender) is dropped.
+                while let Ok((key, d)) = inbox.recv() {
+                    let start = std::time::Instant::now();
+                    let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || {
+                        build(gpu, &sources, key, &d)
+                    })
                     .and_then(|r| r)
                     .map_err(|e| format!("{e} ({})", summary(key, &d)));
-                let took = start.elapsed().as_secs_f64();
-                if took > 0.25 {
-                    crate::host::log(&format!("gs native: specialised pipeline {key:X} built in {took:.2} s (worker)"));
+                    let took = start.elapsed().as_secs_f64();
+                    if took > 0.25 {
+                        crate::host::log(&format!(
+                            "gs native: specialised pipeline {key:X} built in {took:.2} s (worker)"
+                        ));
+                    }
+                    if outbox.send((key, pipe)).is_err() {
+                        break;
+                    }
                 }
-                if outbox.send((key, pipe)).is_err() {
-                    break;
-                }
-            }
-        });
+            });
         if let Err(e) = spawned {
-            crate::host::log(&format!("gs native: no pipeline worker ({e}); specialised pipelines are built at first use"));
+            crate::host::log(&format!(
+                "gs native: no pipeline worker ({e}); specialised pipelines are built at first use"
+            ));
         }
-        Worker { jobs, done, waiting: std::collections::HashSet::new() }
+        Worker {
+            jobs,
+            done,
+            waiting: std::collections::HashSet::new(),
+        }
     }
 }
 
@@ -436,8 +528,12 @@ impl Pipelines {
     /// pipeline given: the specialised one once it is built, else the generic one (the low 32
     /// bits; SpecMode::Background), which draws the same picture. A specialised pipeline that
     /// fails is reported once and the generic one draws instead.
-    pub fn get_special(&mut self, gpu: &'static Gpu, objects: &Objects, key: u64)
-                       -> Result<(u64, &wgpu::RenderPipeline), String> {
+    pub fn get_special(
+        &mut self,
+        gpu: &'static Gpu,
+        objects: &Objects,
+        key: u64,
+    ) -> Result<(u64, &wgpu::RenderPipeline), String> {
         let generic = key & 0xFFFF_FFFF;
         if key != generic {
             #[cfg(not(target_arch = "wasm32"))]
@@ -446,7 +542,9 @@ impl Pipelines {
                     self.receive();
                     let (mut here, mut failed) = (false, None);
                     if !self.built.contains_key(&key) {
-                        let worker = self.worker.get_or_insert_with(|| Worker::start(gpu, Sources::of(objects)));
+                        let worker = self
+                            .worker
+                            .get_or_insert_with(|| Worker::start(gpu, Sources::of(objects)));
                         if worker.waiting.insert(key) {
                             match describe(key as u32) {
                                 Ok(d) => {
@@ -487,11 +585,15 @@ impl Pipelines {
     /// Takes the worker's finished pipelines into the cache (failures logged once).
     #[cfg(not(target_arch = "wasm32"))]
     fn receive(&mut self) {
-        let Some(worker) = self.worker.as_mut() else { return };
+        let Some(worker) = self.worker.as_mut() else {
+            return;
+        };
         while let Ok((key, pipe)) = worker.done.try_recv() {
             worker.waiting.remove(&key);
             if let Err(e) = &pipe {
-                crate::host::log(&format!("gs native: specialised pipeline {key:X}: {e}; the generic one draws"));
+                crate::host::log(&format!(
+                    "gs native: specialised pipeline {key:X}: {e}; the generic one draws"
+                ));
             }
             self.built.insert(key, pipe);
         }
@@ -508,21 +610,30 @@ impl Pipelines {
 
     /// The pipeline for `key` (a cache key: `SPEC_SHIFT`), built on first use (Err: the key has
     /// none, or it failed).
-    pub fn get(&mut self, gpu: &Gpu, objects: &Objects, key: u64) -> Result<&wgpu::RenderPipeline, String> {
+    pub fn get(
+        &mut self,
+        gpu: &Gpu,
+        objects: &Objects,
+        key: u64,
+    ) -> Result<&wgpu::RenderPipeline, String> {
         let built = self.built.entry(key).or_insert_with(|| {
             #[cfg(not(target_arch = "wasm32"))]
             let _spike = SpikeTimer::new("pipeline", key as u32);
             let d = describe(key as u32)?;
             #[cfg(not(target_arch = "wasm32"))]
             let start = std::time::Instant::now();
-            let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || build(gpu, &Sources::of(objects), key, &d))
-                .and_then(|r| r)
-                .map_err(|e| format!("{e} ({})", summary(key, &d)))?;
+            let pipe = scoped_pipeline(gpu, &format!("native pipeline {key:X}"), || {
+                build(gpu, &Sources::of(objects), key, &d)
+            })
+            .and_then(|r| r)
+            .map_err(|e| format!("{e} ({})", summary(key, &d)))?;
             #[cfg(not(target_arch = "wasm32"))]
             {
                 let took = start.elapsed().as_secs_f64();
                 if took > 0.25 {
-                    crate::host::log(&format!("gs native: draw pipeline {key:X} built in {took:.2} s"));
+                    crate::host::log(&format!(
+                        "gs native: draw pipeline {key:X} built in {took:.2} s"
+                    ));
                 }
             }
             Ok(pipe)
@@ -571,8 +682,13 @@ pub(crate) struct SpikeTimer {
 impl SpikeTimer {
     pub(crate) fn new(tag: &'static str, key: u32) -> Self {
         static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        Self { start: ENABLED.get_or_init(|| std::env::var_os("DHD_SPIKES").is_some())
-                   .then(std::time::Instant::now), tag, key }
+        Self {
+            start: ENABLED
+                .get_or_init(|| std::env::var_os("DHD_SPIKES").is_some())
+                .then(std::time::Instant::now),
+            tag,
+            key,
+        }
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -581,9 +697,14 @@ impl Drop for SpikeTimer {
         if let Some(start) = self.start {
             let ms = start.elapsed().as_secs_f64() * 1000.0;
             if ms >= 1.0 || self.tag == "pipeline" {
-                let end = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default().as_secs_f64();
-                crate::host::log(&format!("spike_gpu: end_unix={end:.6} ms={ms:.6} tag={} key={:X}", self.tag, self.key));
+                let end = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs_f64();
+                crate::host::log(&format!(
+                    "spike_gpu: end_unix={end:.6} ms={ms:.6} tag={} key={:X}",
+                    self.tag, self.key
+                ));
             }
         }
     }
@@ -617,12 +738,18 @@ pub(crate) mod gputimes {
 
     impl Slot {
         pub fn render(&self) -> wgpu::RenderPassTimestampWrites<'_> {
-            wgpu::RenderPassTimestampWrites { query_set: &self.0, beginning_of_pass_write_index: Some(self.1),
-                                              end_of_pass_write_index: Some(self.1 + 1) }
+            wgpu::RenderPassTimestampWrites {
+                query_set: &self.0,
+                beginning_of_pass_write_index: Some(self.1),
+                end_of_pass_write_index: Some(self.1 + 1),
+            }
         }
         pub fn compute(&self) -> wgpu::ComputePassTimestampWrites<'_> {
-            wgpu::ComputePassTimestampWrites { query_set: &self.0, beginning_of_pass_write_index: Some(self.1),
-                                               end_of_pass_write_index: Some(self.1 + 1) }
+            wgpu::ComputePassTimestampWrites {
+                query_set: &self.0,
+                beginning_of_pass_write_index: Some(self.1),
+                end_of_pass_write_index: Some(self.1 + 1),
+            }
         }
     }
 
@@ -800,11 +927,13 @@ pub(crate) mod gputimes {
             if !t.sampling {
                 return None;
             }
-            let slot = open(&mut t).filter(|s| s.kinds.len() as u32 * 2 + 2 <= QUERIES).map(|set| {
-                let index = set.kinds.len() as u32 * 2;
-                set.kinds.push(kind);
-                Slot(set.queries.clone(), index)
-            });
+            let slot = open(&mut t)
+                .filter(|s| s.kinds.len() as u32 * 2 + 2 <= QUERIES)
+                .map(|set| {
+                    let index = set.kinds.len() as u32 * 2;
+                    set.kinds.push(kind);
+                    Slot(set.queries.clone(), index)
+                });
             if slot.is_none() {
                 t.untimed += 1;
             }
@@ -863,14 +992,21 @@ pub(crate) mod gputimes {
             let period = t.period;
             for i in 0..SETS {
                 let set = &mut t.sets[i];
-                let Some(result) = set.map.as_ref().and_then(|m| m.lock().unwrap_or_else(|p| p.into_inner()).clone())
-                else { continue };
+                let Some(result) = set
+                    .map
+                    .as_ref()
+                    .and_then(|m| m.lock().unwrap_or_else(|p| p.into_inner()).clone())
+                else {
+                    continue;
+                };
                 let (mut ns, mut passes) = ([0.0f64; 5], [0u64; 5]);
                 let (mut first, mut last) = (u64::MAX, 0u64);
                 if result.is_ok() {
                     {
                         let data = set.read.slice(..set.resolved as u64 * 8).get_mapped_range();
-                        let stamp = |q: usize| u64::from_le_bytes(data[q * 8..q * 8 + 8].try_into().expect("8 bytes"));
+                        let stamp = |q: usize| {
+                            u64::from_le_bytes(data[q * 8..q * 8 + 8].try_into().expect("8 bytes"))
+                        };
                         for (p, &kind) in set.kinds.iter().enumerate() {
                             let (a, b) = (stamp(p * 2), stamp(p * 2 + 1));
                             if a == 0 || b < a {
@@ -911,7 +1047,14 @@ pub(crate) mod gputimes {
                 let f = t.frames as f64;
                 let total: f64 = t.ns.iter().sum();
                 let parts: Vec<String> = (0..5)
-                    .map(|k| format!("{}={:.3}/{:.1}", NAMES[k], t.ns[k] / f / 1e6, t.passes[k] as f64 / f))
+                    .map(|k| {
+                        format!(
+                            "{}={:.3}/{:.1}",
+                            NAMES[k],
+                            t.ns[k] / f / 1e6,
+                            t.passes[k] as f64 / f
+                        )
+                    })
                     .collect();
                 crate::host::log(&format!("gpu_times: frames={} gpu_ms={:.3} span_ms={:.3} ms/passes {} untimed_passes={}",
                                           t.frames, total / f / 1e6, t.span / f / 1e6, parts.join(" "), t.untimed));
@@ -945,7 +1088,10 @@ mod tests {
         assert_eq!(without_kept_colour(key(5, 6, 1), 15), (key(5, 6, 1), 15));
         // Min and Max ignore the factors; no blend stays no blend.
         assert_eq!(without_kept_colour(key(1, 2, 4), 7), (key(1, 2, 4), 7));
-        assert_eq!(without_kept_colour(1 << 1 | 2 << 6, 7), (1 << 1 | 2 << 6, 7));
+        assert_eq!(
+            without_kept_colour(1 << 1 | 2 << 6, 7),
+            (1 << 1 | 2 << 6, 7)
+        );
     }
 
     /// `spec` keeps only what the draw's path reads, so draws that differ elsewhere share a pipeline.
@@ -953,12 +1099,24 @@ mod tests {
     fn spec_keeps_what_the_path_reads() {
         let given = 1 << 31 | 1 << 30 | 1 << 29;
         // Untextured: no texture bits, CLAMP modes or size; fog, the alpha test and premultiply stay.
-        assert_eq!(spec(2 | 4 | 32 | 256 | 1024 | 2048, [3, 2], 5, true, true), given);
-        assert_eq!(spec(16 | 64 | 128 | 512 | 32, [1, 1], 6, true, true), given | 16 | 64 | 128 | 512 | 6 << 16);
+        assert_eq!(
+            spec(2 | 4 | 32 | 256 | 1024 | 2048, [3, 2], 5, true, true),
+            given
+        );
+        assert_eq!(
+            spec(16 | 64 | 128 | 512 | 32, [1, 1], 6, true, true),
+            given | 16 | 64 | 128 | 512 | 6 << 16
+        );
         // Textured: every flag bit, the CLAMP modes, the size and the unit alpha; the test only with
         // the alpha test on.
-        assert_eq!(spec(1 | 32 | 16, [2, 3], 5, false, false), given | 1 | 32 | 16 | 2 << 12 | 3 << 14);
-        assert_eq!(spec(1 | 64, [0, 1], 7, true, true), given | 1 | 64 | 1 << 14 | 7 << 16 | 1 << 19 | 1 << 20);
+        assert_eq!(
+            spec(1 | 32 | 16, [2, 3], 5, false, false),
+            given | 1 | 32 | 16 | 2 << 12 | 3 << 14
+        );
+        assert_eq!(
+            spec(1 | 64, [0, 1], 7, true, true),
+            given | 1 | 64 | 1 << 14 | 7 << 16 | 1 << 19 | 1 << 20
+        );
         // Upper flag bits are not the shader's.
         assert_eq!(spec(1 | 1 << 12, [0, 0], 0, false, false), given | 1);
     }

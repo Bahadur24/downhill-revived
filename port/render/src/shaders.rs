@@ -25,10 +25,22 @@ const fn has_cr(s: &str) -> bool {
     false
 }
 
-const _: () = assert!(!has_cr(RASTER), "port/gs/raster.wgsl has CR line endings (it must be LF)");
-const _: () = assert!(!has_cr(PRESENT), "port/gs/present.wgsl has CR line endings (it must be LF)");
-const _: () = assert!(!has_cr(NATIVE), "port/gs/native.wgsl has CR line endings (it must be LF)");
-const _: () = assert!(!has_cr(NATIVE_DUAL), "port/gs/native_dual.wgsl has CR line endings (it must be LF)");
+const _: () = assert!(
+    !has_cr(RASTER),
+    "port/gs/raster.wgsl has CR line endings (it must be LF)"
+);
+const _: () = assert!(
+    !has_cr(PRESENT),
+    "port/gs/present.wgsl has CR line endings (it must be LF)"
+);
+const _: () = assert!(
+    !has_cr(NATIVE),
+    "port/gs/native.wgsl has CR line endings (it must be LF)"
+);
+const _: () = assert!(
+    !has_cr(NATIVE_DUAL),
+    "port/gs/native_dual.wgsl has CR line endings (it must be LF)"
+);
 
 #[cfg(all(test, feature = "native"))]
 mod tests {
@@ -38,11 +50,30 @@ mod tests {
             ("raster.wgsl", super::RASTER.into()),
             ("present.wgsl", super::PRESENT.into()),
             ("native.wgsl", super::NATIVE.into()),
-            ("native.wgsl + native_dual.wgsl", format!("enable dual_source_blending;\n{}{}", super::NATIVE, super::NATIVE_DUAL)),
-            ("native/surfaces.rs DEPTH_FILL_WGSL", crate::native::surfaces::DEPTH_FILL_WGSL.into()),
-            ("native/zread.rs ZREAD_WGSL", crate::native::zread::ZREAD_WGSL.into()),
-            ("present/counter.rs SHADER", crate::present::counter::SHADER.into()),
-            ("present/touch.rs SHADER", crate::present::touch::SHADER.into()),
+            (
+                "native.wgsl + native_dual.wgsl",
+                format!(
+                    "enable dual_source_blending;\n{}{}",
+                    super::NATIVE,
+                    super::NATIVE_DUAL
+                ),
+            ),
+            (
+                "native/surfaces.rs DEPTH_FILL_WGSL",
+                crate::native::surfaces::DEPTH_FILL_WGSL.into(),
+            ),
+            (
+                "native/zread.rs ZREAD_WGSL",
+                crate::native::zread::ZREAD_WGSL.into(),
+            ),
+            (
+                "present/counter.rs SHADER",
+                crate::present::counter::SHADER.into(),
+            ),
+            (
+                "present/touch.rs SHADER",
+                crate::present::touch::SHADER.into(),
+            ),
         ]
     }
 
@@ -52,11 +83,15 @@ mod tests {
     #[test]
     fn no_texture_arguments() {
         for (name, source) in modules() {
-            let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
             let handle = |ty: naga::Handle<naga::Type>| match module.types[ty].inner {
                 naga::TypeInner::Image { .. } | naga::TypeInner::Sampler { .. } => true,
                 naga::TypeInner::BindingArray { base, .. } => {
-                    matches!(module.types[base].inner, naga::TypeInner::Image { .. } | naga::TypeInner::Sampler { .. })
+                    matches!(
+                        module.types[base].inner,
+                        naga::TypeInner::Image { .. } | naga::TypeInner::Sampler { .. }
+                    )
                 }
                 _ => false,
             };
@@ -75,13 +110,19 @@ mod tests {
     #[test]
     fn no_vertex_texture_reads() {
         for (name, source) in modules() {
-            let module = naga::front::wgsl::parse_str(&source).unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
-            let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-                .validate(&module)
-                .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|e| panic!("{name}: {}", e.emit_to_string(&source)));
+            let info = naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|e| panic!("{name}: {e:?}"));
             let image = |ty: naga::Handle<naga::Type>| match module.types[ty].inner {
                 naga::TypeInner::Image { .. } => true,
-                naga::TypeInner::BindingArray { base, .. } => matches!(module.types[base].inner, naga::TypeInner::Image { .. }),
+                naga::TypeInner::BindingArray { base, .. } => {
+                    matches!(module.types[base].inner, naga::TypeInner::Image { .. })
+                }
                 _ => false,
             };
             let mut vertex = 0;
@@ -92,12 +133,20 @@ mod tests {
                 vertex += 1;
                 let uses = info.get_entry_point(i);
                 for (handle, global) in module.global_variables.iter() {
-                    assert!(!(image(global.ty) && !uses[handle].is_empty()),
-                            "{name}: vertex entry point {} reads the texture `{}`", ep.name, global.name.as_deref().unwrap_or("?"));
+                    assert!(
+                        !(image(global.ty) && !uses[handle].is_empty()),
+                        "{name}: vertex entry point {} reads the texture `{}`",
+                        ep.name,
+                        global.name.as_deref().unwrap_or("?")
+                    );
                 }
             }
             // The check sees the vertex stages it is meant for (raster.wgsl and zread have none).
-            if name.contains("touch") || name.contains("counter") || name.starts_with("native.wgsl") || name.starts_with("present") {
+            if name.contains("touch")
+                || name.contains("counter")
+                || name.starts_with("native.wgsl")
+                || name.starts_with("present")
+            {
                 assert!(vertex > 0, "{name}: no vertex entry point found");
             }
         }
@@ -109,9 +158,12 @@ mod tests {
         let source = "@group(0) @binding(0) var t: texture_2d<f32>;
             @vertex fn v() -> @builtin(position) vec4<f32> { return textureLoad(t, vec2<i32>(0), 0); }";
         let module = naga::front::wgsl::parse_str(source).unwrap();
-        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
-            .validate(&module)
-            .unwrap();
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .unwrap();
         let (handle, _) = module.global_variables.iter().next().unwrap();
         assert!(!info.get_entry_point(0)[handle].is_empty());
     }

@@ -15,7 +15,11 @@ pub const UNNAMED: &str = "RIDER";
 /// `text` as a name can hold it: upper case (ASCII), only LETTERS, at most MAX of them. What a field
 /// keeps while the player types.
 pub fn clean(text: &str) -> String {
-    text.chars().map(|c| c.to_ascii_uppercase()).filter(|&c| LETTERS.contains(c)).take(MAX).collect()
+    text.chars()
+        .map(|c| c.to_ascii_uppercase())
+        .filter(|&c| LETTERS.contains(c))
+        .take(MAX)
+        .collect()
 }
 
 /// The name saved for `text`: `clean`, without spaces at either end ("": no name).

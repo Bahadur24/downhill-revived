@@ -172,8 +172,9 @@ void host_service_host_init(void);
 void host_service_host_console_init(void);
 int host_service_host_disc_ready(void);
 int host_service_host_poll_dump(void);
-void host_service_host_settings_load(void);
+int host_service_host_settings_load(void);
 int host_service_host_setting_save(uint32_t a0, uint32_t a1);
+int host_service_host_setting_read(uint32_t a0, uint32_t a1, uint32_t a2);
 int host_service_host_setting_locked(uint32_t a0);
 void host_service_host_pad_device(int a0, uint32_t a1);
 void host_service_host_pad_vibrate(int a0, int a1, int a2);
@@ -201,15 +202,26 @@ void host_service_gs_window_close(void);
    picture and without the native renderer (gs/gpu_rust_native.inc; PC SETTINGS shows it). */
 int host_service_gs_scale(int asked);
 /* The rooms this build offers, port/net/net.h's NET_OFFER_* bits: the one switch, the host's, so
-   the core is the same on every platform (finding 143). Desktop builds: SFU and P2P rooms. Android
-   (port/net/net.c, at compile time) and the browser (port/web/www/net.js): P2P rooms only
-   (finding 180), which need no SFU session; no setting changes it. At 0 the main menu has no
-   ONLINE row, DHD_NET_* starts no online race, and the connections below refuse. */
+   the core is the same on every platform (finding 143). Native desktop builds offer SFU, P2P, local
+   LAN and Tailnet rooms; Android offers P2P, LAN and Tailnet (the LAN host is this device). The
+   browser offers P2P only. */
 int host_service_net_offered(void);
 void host_service_net_init(uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3);
 /* p2p: a P2P room (finding 180), else an SFU one. */
 int host_service_net_create_room(int p2p);
 int host_service_net_join_room(uint32_t a0);
+int host_service_net_host_lan(void);
+int host_service_net_host_tailnet(uint32_t address); /* this device's Tailscale IPv4, no port */
+int host_service_net_join_lan(uint32_t a0);
+int host_service_net_join_lan_pin(uint32_t a0, uint32_t a1);
+int host_service_net_join_tailnet_pin(uint32_t address, uint32_t pin); /* Tailscale IPv4:port */
+int host_service_net_set_lan_pin(uint32_t a0);
+int host_service_net_discover_lan_start(void);
+int host_service_net_discover_lan_poll(uint32_t out, int max);
+int host_service_net_lan_interfaces(uint32_t out, int max);
+int host_service_net_lan_select_ip(uint32_t address);
+int host_service_net_lan_refresh_address(void);
+void host_service_net_lan_check(void);
 void host_service_net_leave(void);
 void host_service_net_get_lobby(uint32_t a0);
 void host_service_net_pick(int a0, int a1, int a2);
@@ -220,6 +232,7 @@ void host_service_net_rotation(uint32_t address, int count);
 void host_service_net_end_race(void);
 void host_service_net_race_go(double at);  /* the race's start moment, to the room too (finding 187) */
 void host_service_net_set_ready(int a0);
+void host_service_net_kick(int member);  /* host-only room removal; the LAN service checks role */
 void host_service_net_start_race(void);
 int host_service_net_racing(void);
 double host_service_net_seconds(void);

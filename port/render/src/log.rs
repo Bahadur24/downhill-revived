@@ -22,11 +22,17 @@ impl ::log::Log for HostLogger {
     fn enabled(&self, m: &::log::Metadata) -> bool {
         // discord-rich-presence's own lines (one per try while Discord isn't running) stay out:
         // dhd_presence logs what the player needs, once
-        m.level() <= filter(LEVEL.load(Ordering::Relaxed)) && !m.target().starts_with("discord_rich_presence")
+        m.level() <= filter(LEVEL.load(Ordering::Relaxed))
+            && !m.target().starts_with("discord_rich_presence")
     }
     fn log(&self, r: &::log::Record) {
         if self.enabled(r.metadata()) {
-            crate::host::log(&format!("dhd_render: {} {}: {}", r.level(), r.target(), r.args()));
+            crate::host::log(&format!(
+                "dhd_render: {} {}: {}",
+                r.level(),
+                r.target(),
+                r.args()
+            ));
         }
     }
     fn flush(&self) {}

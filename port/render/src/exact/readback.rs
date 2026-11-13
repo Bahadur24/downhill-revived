@@ -82,13 +82,20 @@ pub fn map_start(buffer: &wgpu::Buffer, range: std::ops::Range<u64>) -> MapStatu
 #[cfg(not(target_arch = "wasm32"))]
 pub fn wait(gpu: &Gpu) -> Result<(), String> {
     let _spike = crate::native::pipelines::SpikeTimer::new("readback", 0);
-    gpu.device.poll(wgpu::PollType::wait_indefinitely()).map(|_| ()).map_err(|e| format!("poll: {e}"))
+    gpu.device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map(|_| ())
+        .map_err(|e| format!("poll: {e}"))
 }
 
 /// Natively: maps `range` of `buffer` for reading and blocks until it is mapped (the display
 /// capture's path too). Err when the map or the poll fails; the buffer is then not mapped.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn map_blocking(gpu: &Gpu, buffer: &wgpu::Buffer, range: std::ops::Range<u64>) -> Result<(), String> {
+pub fn map_blocking(
+    gpu: &Gpu,
+    buffer: &wgpu::Buffer,
+    range: std::ops::Range<u64>,
+) -> Result<(), String> {
     let status = map_start(buffer, range);
     wait(gpu)?;
     let r = status.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -103,7 +110,9 @@ impl Exact {
     /// `dhdr_exact_read_begin`: 1 started (the object stays held until finish), 0 could not start.
     pub fn read_begin(&mut self, buffer: u32, want: &[u32; 16]) -> i32 {
         if buffer != DHDR_B_READBACK && buffer != DHDR_B_STAGED {
-            crate::host::log(&format!("dhd_render: dhdr_exact_read_begin: buffer {buffer} is not READBACK or STAGED"));
+            crate::host::log(&format!(
+                "dhd_render: dhdr_exact_read_begin: buffer {buffer} is not READBACK or STAGED"
+            ));
             return 0;
         }
         if self.reading.flight.is_some() {
@@ -132,7 +141,10 @@ impl Exact {
             self.stats.submits += 1;
         }
         let page = DHDR_PAGE_BYTES as u64;
-        let status = map_start(self.buffers.get(buffer), first as u64 * page..last as u64 * page);
+        let status = map_start(
+            self.buffers.get(buffer),
+            first as u64 * page..last as u64 * page,
+        );
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(e) = wait(self.gpu) {
             crate::host::log(&format!("dhd_render: dhdr_exact_read_begin: {e}"));
@@ -161,7 +173,9 @@ impl Exact {
             0
         };
         if buffer != began || span(want) != (first, last) {
-            return fail(&format!("buffer {buffer} or want differs from the begin's (buffer {began})"));
+            return fail(&format!(
+                "buffer {buffer} or want differs from the begin's (buffer {began})"
+            ));
         }
         let page = DHDR_PAGE_BYTES as usize;
         if image.len() < DHDR_PAGES as usize * page {
@@ -174,7 +188,8 @@ impl Exact {
         }
         if mapped {
             {
-                let view = b.get_mapped_range(first as u64 * page as u64..last as u64 * page as u64);
+                let view =
+                    b.get_mapped_range(first as u64 * page as u64..last as u64 * page as u64);
                 for p in first..last {
                     if wanted(want, p) {
                         let from = (p - first) as usize * page;

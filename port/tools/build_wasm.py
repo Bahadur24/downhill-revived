@@ -438,7 +438,8 @@ def image_stage(wanted):
     aliases = {}
     for m in re.finditer(r'/alternatename:(\w+)=(\w+)', symbols_s):
         aliases[m.group(1)] = m.group(2)
-    p = run(['clang', '--target=i686-pc-windows-itanium', '-c', paths[0], '-o', paths[0] + '.o'])
+    coff_clang = os.environ.get('DHD_COFF_CLANG', 'clang')
+    p = run([coff_clang, '--target=i686-pc-windows-itanium', '-c', paths[0], '-o', paths[0] + '.o'])
     if p.returncode:
         sys.exit(p.stderr)
     image_obj = paths[0] + '.o'
@@ -1274,7 +1275,7 @@ NOT_CORE = ('docs/', 'online/', '.github/', 'port/launcher/', 'port/render/', 'p
 CORE_NEW_FILES = ('src/', 'include/', 'port/runtime/', 'port/hle/', 'port/include/', 'port/host/', 'port/gs/',
                   'port/net/', 'port/tools/', 'port/patches')
 # the environment the build reads (the tools' folders are in the key by their resolved paths)
-CORE_ENV = ('DHD_VUTEXT', 'WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR')
+CORE_ENV = ('DHD_VUTEXT', 'WASI_SYSROOT', 'SIMDE_DIR', 'WABT_DIR', 'DHD_COFF_CLANG')
 
 
 def core_inputs_key():
@@ -1312,6 +1313,9 @@ def core_inputs_key():
                 h.update(os.path.relpath(p, base).encode() + b'\0' + memo.sha256(p))
     h.update(('%s|%s|%s\n' % (WASI, SIMDE, WABT)).encode())
     h.update(run(['clang', '--version']).stdout.encode())
+    coff_clang = os.environ.get('DHD_COFF_CLANG', 'clang')
+    if coff_clang != 'clang':
+        h.update(run([coff_clang, '--version']).stdout.encode())
     memo.save()
     return h.hexdigest()
 

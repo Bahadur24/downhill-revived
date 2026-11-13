@@ -67,9 +67,17 @@ pub unsafe extern "C" fn dhd_settings_load(
 /// # Safety
 /// The three are NUL-terminated strings.
 #[no_mangle]
-pub unsafe extern "C" fn dhd_settings_save(path: *const c_char, key: *const c_char, value: *const c_char) -> c_int {
+pub unsafe extern "C" fn dhd_settings_save(
+    path: *const c_char,
+    key: *const c_char,
+    value: *const c_char,
+) -> c_int {
     // SAFETY: the caller's contract.
-    let (Some(path), Some(key), Some(value)) = (unsafe { text(path) }, unsafe { text(key) }, unsafe { text(value) }) else {
+    let (Some(path), Some(key), Some(value)) =
+        (unsafe { text(path) }, unsafe { text(key) }, unsafe {
+            text(value)
+        })
+    else {
         return 0;
     };
     matches!(crate::save(Path::new(path), key, value), Ok(true)) as c_int
@@ -81,7 +89,12 @@ pub unsafe extern "C" fn dhd_settings_save(path: *const c_char, key: *const c_ch
 /// # Safety
 /// `path` and `key` are NUL-terminated strings; `out` has room for `size` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn dhd_settings_read(path: *const c_char, key: *const c_char, out: *mut c_char, size: usize) -> c_int {
+pub unsafe extern "C" fn dhd_settings_read(
+    path: *const c_char,
+    key: *const c_char,
+    out: *mut c_char,
+    size: usize,
+) -> c_int {
     // SAFETY: the caller's contract.
     let (Some(path), Some(key)) = (unsafe { text(path) }, unsafe { text(key) }) else {
         return 0;
@@ -108,7 +121,11 @@ pub unsafe extern "C" fn dhd_settings_read(path: *const c_char, key: *const c_ch
 /// # Safety
 /// `path` is a NUL-terminated string; `out` has room for `size` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn dhd_settings_install_id(path: *const c_char, out: *mut c_char, size: usize) -> c_int {
+pub unsafe extern "C" fn dhd_settings_install_id(
+    path: *const c_char,
+    out: *mut c_char,
+    size: usize,
+) -> c_int {
     // SAFETY: the caller's contract.
     let Some(path) = (unsafe { text(path) }) else {
         return 0;
@@ -164,7 +181,10 @@ pub unsafe extern "C" fn dhd_controls_layouts(
 ) {
     let mut problems = Vec::new();
     // SAFETY: the caller's contract.
-    let c = Controls::from_values(unsafe { control_values([keyboard, pad1, pad2]) }, &mut problems);
+    let c = Controls::from_values(
+        unsafe { control_values([keyboard, pad1, pad2]) },
+        &mut problems,
+    );
     if !out.is_null() {
         // SAFETY: out has room for three.
         unsafe { std::ptr::copy_nonoverlapping(c.layouts.as_ptr(), out, 3) };
@@ -207,13 +227,24 @@ pub unsafe extern "C" fn dhd_controls_edit(
     message_size: usize,
 ) -> c_int {
     // SAFETY: the caller's contract.
-    let mut c = Controls::from_values(unsafe { control_values([keyboard, pad1, pad2]) }, &mut Vec::new());
-    let (Ok(device), Ok(target), Ok(slot)) = (usize::try_from(device), usize::try_from(target), usize::try_from(slot)) else {
+    let mut c = Controls::from_values(
+        unsafe { control_values([keyboard, pad1, pad2]) },
+        &mut Vec::new(),
+    );
+    let (Ok(device), Ok(target), Ok(slot)) = (
+        usize::try_from(device),
+        usize::try_from(target),
+        usize::try_from(slot),
+    ) else {
         return 0;
     };
     let input = u8::try_from(input).unwrap_or(0);
     let edit = match edit {
-        0 => Edit::Assign { target, slot, input },
+        0 => Edit::Assign {
+            target,
+            slot,
+            input,
+        },
         1 => Edit::Clear { target, slot },
         2 => Edit::Reset,
         3 => Edit::SwapSticks(input != 0),

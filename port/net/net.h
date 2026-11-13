@@ -3,9 +3,9 @@
 
    Races use state sync (findings 041, 044): every PC runs its own one-player race and sends
    snapshots of the riders it owns (STATE frames) and hits it deals (EVENT frames) with
-   net_send_frame, through the room's SFU association (port/render/net/src/sfu.rs); the others'
-   riders are puppets (port/hle/online.c, port/hle/puppet.c). Background threads keep the room's
-   WebSocket (lobby JSON, binary pings) and the SFU association. */
+   net_send_frame; online rooms use the SFU/P2P transport and LAN rooms use the host's local relay.
+   The others' riders are puppets (port/hle/online.c, port/hle/puppet.c). Background threads keep
+   the room's WebSocket (lobby JSON, binary pings) and any online SFU association. */
 #ifndef NET_H
 #define NET_H
 
@@ -33,6 +33,11 @@ typedef struct {
     int place;
     char region[8];            /* their region as Cloudflare places them ("EU"...), "" unknown;
                                   never their country (finding 135) */
+    /* LAN connectivity check; appended for core/host ABI compatibility. */
+    uint64_t check_id;
+    int check_state;           /* 0 none, 1 pending, 2 reachable, 3 timed out */
+    int connection_state;      /* 0 connected, 1 reconnecting */
+    int reconnect_ms;          /* server-reported remaining reconnect grace, else 0 */
 } NetMember;
 
 typedef struct {
@@ -96,6 +101,18 @@ typedef struct {
     /* The race's start moment as the room sent it (server ms; 0 none yet): the host's START over
        the room as well as the race link, for a game whose race link brought nothing (finding 187). */
     double race_go_at;
+    /* Appended to preserve the shared core/host ABI: local room metadata, no online service. */
+    int is_lan;
+    char lan_address[64];       /* host's private IPv4:port, shown to guests for manual entry */
+    /* The latest LAN pre-race check; appended for ABI compatibility. */
+    uint64_t check_id;
+    double check_deadline;
+    int check_valid;
+    int pin_required;           /* LAN room only; never contains the PIN */
+    int reconnect_remaining_ms; /* this PC's remaining LAN reconnect grace; 0 otherwise */
+    int reconnect_attempt;      /* number of reconnect attempts made */
+    char lan_room_id[17];       /* stable per-host-session id for LAN rediscovery */
+    int is_tailnet;              /* LAN room reached through Tailscale; appended ABI field */
 } NetLobby;
 
 /* Host settings; fields at -1 (room_name NULL) are left as they are. */
@@ -117,11 +134,30 @@ typedef struct {
     char area[12];             /* where the room runs, finer ("EU WEST"...; finding 181), "" unknown */
 } NetLobbyInfo;
 
+/* A discovered private LAN room. The address is only used locally and never sent online. */
+typedef struct {
+    char address[64];
+    char room_name[32];
+    int players, track;
+    char room_id[17];
+    int pin_required;
+    int max_players;
+    int rtt_ms;                 /* measured by this phone's current discovery scan; -1 unknown */
+} NetLanRoom;
+
+/* One currently assigned, bindable local private IPv4 interface. */
+typedef struct {
+    char name[16];
+    char address[16];
+    int is_wifi;
+    int selected;
+} NetLanInterface;
+
 /* base_url: "wss://host" or "ws://127.0.0.1:8787". version: the build's version string (the
    server refuses players whose version differs from the host's). iso_sha256: 64 lowercase hex. */
 void net_init(const char *base_url, const char *name, const char *version, const char *iso_sha256);
 /* host_service_net_offered's bits: the kinds of room this build offers (port/host/host_api.h). */
-enum { NET_OFFER_SFU = 1, NET_OFFER_P2P = 2 };
+enum { NET_OFFER_SFU = 1, NET_OFFER_P2P = 2, NET_OFFER_LAN = 4, NET_OFFER_TAILNET = 8 };
 
 /* A room code has 6 characters (an SFU room) or 7 (a P2P room, findings 180, 186): both are
    server rooms, a P2P one racing over a star of the games' own connections. A room runs where
@@ -130,6 +166,19 @@ enum { NET_OFFER_SFU = 1, NET_OFFER_P2P = 2 };
    (finding 181). */
 int net_create_room(int p2p);
 int net_join_room(const char *code);   /* -1 when the code can't be one */
+int net_host_lan(void);                /* starts the local host service and joins its own room */
+int net_host_tailnet(const char *address); /* private local room, advertised at this device's Tailscale IPv4 */
+int net_join_lan(const char *address); /* connects to an IPv4:port entered from the LAN menu */
+int net_join_lan_pin(const char *address, const char *pin); /* LAN join with optional PIN */
+int net_join_tailnet(const char *address); /* connects only to a Tailscale 100.64.0.0/10 IPv4:port */
+int net_join_tailnet_pin(const char *address, const char *pin); /* Tailscale join with optional room PIN */
+int net_lan_set_pin(const char *pin);  /* host-only; empty clears the room PIN */
+int net_discover_lan_start(void);      /* starts an asynchronous bounded UDP scan */
+int net_discover_lan_poll(NetLanRoom *out, int max); /* -2 working, -1 failed, else count */
+int net_lan_interfaces(NetLanInterface *out, int max); /* actual local private IPv4 interfaces */
+int net_lan_select_ip(const char *address);            /* host-only, assigned local address only */
+int net_lan_refresh_address(void);                     /* refreshes current LAN advertisement */
+void net_lan_check_connections(void);  /* host-only fresh LAN connectivity check */
 
 /* A room's code as dhd.log shows it: net_log_code(code).text. Anyone holding an open P2P room's
    code can join it and so learn its hub's network address, and players post dhd.log in public:
@@ -186,9 +235,9 @@ int net_riders_ms(void);
 int net_racing(void);
 int net_local_slot(void);
 
-/* Race frames, carried by the Cloudflare Realtime SFU to every other racer (finding 158): a STATE
-   bundle of riders this PC owns, an event it decided for another PC's rider. A frame is type, slot
-   (the receiver sets it from the channel), payload. */
+/* Race frames: online SFU/P2P rooms carry them over their race transport; LAN rooms relay them over
+   the host's local WebSocket. A STATE bundle holds riders this PC owns; an EVENT is one it decided
+   for another PC's rider. A frame is type, slot (the receiver sets it from the channel), payload. */
 /* NET_FRAME_MAX: the largest frame accepted. A STATE frame is one bundle of at most
    STATE_BUNDLE_MAX bytes (port/hle/state_bundle.h: as many riders as fit one datagram, finding
    169); a PC with more riders sends several. */

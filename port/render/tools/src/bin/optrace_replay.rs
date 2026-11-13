@@ -122,7 +122,10 @@ impl Failure {
     }
     fn text(&self) -> &str {
         match self {
-            Failure::Refused(s) | Failure::Invalid(s) | Failure::Mismatch(s) | Failure::Error(s) => s,
+            Failure::Refused(s)
+            | Failure::Invalid(s)
+            | Failure::Mismatch(s)
+            | Failure::Error(s) => s,
         }
     }
 }
@@ -170,24 +173,32 @@ fn read_header(r: &mut dyn Read) -> Result<Header, Failure> {
     let io = |e: String| Failure::Invalid(e);
     let mut fixed = [0u8; HEADER_FIXED + 4];
     if !read_full(r, &mut fixed[..16]).map_err(io)? {
-        return Err(Failure::Refused("not an optrace: shorter than its header".into()));
+        return Err(Failure::Refused(
+            "not an optrace: shorter than its header".into(),
+        ));
     }
     if &fixed[..8] != MAGIC {
         return Err(Failure::Refused("not an optrace: bad magic".into()));
     }
     let version = le32(&fixed, 8);
     if version != VERSION {
-        return Err(Failure::Refused(format!("optrace version {version}: this replayer knows version {VERSION} only")));
+        return Err(Failure::Refused(format!(
+            "optrace version {version}: this replayer knows version {VERSION} only"
+        )));
     }
     if !read_full(r, &mut fixed[16..]).map_err(io)? {
         return Err(Failure::Invalid("truncated header".into()));
     }
     let header_bytes = le32(&fixed, 12);
     if !header_bytes.is_multiple_of(4) || (header_bytes as usize) < HEADER_FIXED + 8 {
-        return Err(Failure::Invalid(format!("header_bytes {header_bytes}: not a multiple of 4 or too small")));
+        return Err(Failure::Invalid(format!(
+            "header_bytes {header_bytes}: not a multiple of 4 or too small"
+        )));
     }
     if header_bytes > 1 << 20 {
-        return Err(Failure::Invalid(format!("header_bytes {header_bytes}: implausibly large")));
+        return Err(Failure::Invalid(format!(
+            "header_bytes {header_bytes}: implausibly large"
+        )));
     }
     let mut rest = vec![0u8; header_bytes as usize - fixed.len()];
     if !read_full(r, &mut rest).map_err(io)? {
@@ -198,15 +209,21 @@ fn read_header(r: &mut dyn Read) -> Result<Header, Failure> {
 
     let sha = &all[48..88];
     if !sha.iter().all(|c| c.is_ascii_hexdigit()) {
-        return Err(Failure::Invalid("recorder_sha is not 40 ASCII hex digits".into()));
+        return Err(Failure::Invalid(
+            "recorder_sha is not 40 ASCII hex digits".into(),
+        ));
     }
     let text = |at: usize, what: &str| -> Result<(String, usize), Failure> {
         if at + 4 > all.len() {
-            return Err(Failure::Invalid(format!("{what}_bytes runs past header_bytes")));
+            return Err(Failure::Invalid(format!(
+                "{what}_bytes runs past header_bytes"
+            )));
         }
         let n = le32(&all, at) as usize;
         if at + 4 + n > all.len() {
-            return Err(Failure::Invalid(format!("{what} ({n} bytes) runs past header_bytes")));
+            return Err(Failure::Invalid(format!(
+                "{what} ({n} bytes) runs past header_bytes"
+            )));
         }
         let s = std::str::from_utf8(&all[at + 4..at + 4 + n])
             .map_err(|_| Failure::Invalid(format!("{what} is not UTF-8")))?;
@@ -251,11 +268,17 @@ fn compiler_name(c: u32) -> &'static str {
 
 fn print_header(path: &str, h: &Header) {
     println!("optrace: {path}");
-    println!("optrace: version {VERSION}, header {} bytes, raster_flags {:#x}", h.header_bytes, h.raster_flags);
+    println!(
+        "optrace: version {VERSION}, header {} bytes, raster_flags {:#x}",
+        h.header_bytes, h.raster_flags
+    );
     println!("optrace: recorded on '{}' ({}, vendor {:#06x} device {:#06x}, driver {:#x}, compiler {}, fallback {})",
              h.adapter, api_name(h.api), h.vendor_id, h.device_id, h.driver_version, compiler_name(h.compiler),
              h.fallback);
-    println!("optrace: recorder {}, source '{}'", h.recorder_sha, h.source);
+    println!(
+        "optrace: recorder {}, source '{}'",
+        h.recorder_sha, h.source
+    );
 }
 
 // ------------------------------------------------------------------------------------ records
@@ -263,13 +286,40 @@ fn print_header(path: &str, h: &Header) {
 /// One decoded record (payload checked against its tag's exact size).
 #[derive(Debug)]
 enum Op<'a> {
-    Write { buffer: u32, offset: u32, data: &'a [u8] },
-    Copy { from: u32, from_offset: u32, to: u32, to_offset: u32, bytes: u32 },
-    Batch { dynamic_offset: u32, groups_x: u32, groups_y: u32 },
-    Record { pipeline: u32, x_word: u32, y_word: u32 },
+    Write {
+        buffer: u32,
+        offset: u32,
+        data: &'a [u8],
+    },
+    Copy {
+        from: u32,
+        from_offset: u32,
+        to: u32,
+        to_offset: u32,
+        bytes: u32,
+    },
+    Batch {
+        dynamic_offset: u32,
+        groups_x: u32,
+        groups_y: u32,
+    },
+    Record {
+        pipeline: u32,
+        x_word: u32,
+        y_word: u32,
+    },
     Submit,
-    Read { buffer: u32, want: [u32; 16], result: u32, pages: &'a [u8] },
-    Capture { width: u32, height: u32, pixels: &'a [u8] },
+    Read {
+        buffer: u32,
+        want: [u32; 16],
+        result: u32,
+        pages: &'a [u8],
+    },
+    Capture {
+        width: u32,
+        height: u32,
+        pixels: &'a [u8],
+    },
     Destroy,
 }
 
@@ -282,7 +332,11 @@ fn decode(tag: u32, p: &[u8]) -> Result<Op<'_>, String> {
         if p.len() == n {
             Ok(())
         } else {
-            Err(format!("{} payload is {} bytes, must be {n}", tag_name(tag), p.len()))
+            Err(format!(
+                "{} payload is {} bytes, must be {n}",
+                tag_name(tag),
+                p.len()
+            ))
         }
     };
     let w = |i: usize| le32(p, 4 * i);
@@ -290,35 +344,62 @@ fn decode(tag: u32, p: &[u8]) -> Result<Op<'_>, String> {
         if b < DHDR_B_COUNT {
             Ok(())
         } else {
-            Err(format!("{} names buffer {b} (DHDR_B_COUNT is {DHDR_B_COUNT})", tag_name(tag)))
+            Err(format!(
+                "{} names buffer {b} (DHDR_B_COUNT is {DHDR_B_COUNT})",
+                tag_name(tag)
+            ))
         }
     };
     Ok(match tag {
         TAG_WRITE => {
             if p.len() < 12 {
-                return Err(format!("WRITE payload is {} bytes, shorter than its 12-byte head", p.len()));
+                return Err(format!(
+                    "WRITE payload is {} bytes, shorter than its 12-byte head",
+                    p.len()
+                ));
             }
             let bytes = w(2) as usize;
             need(12 + bytes)?;
             buffer_ok(w(0))?;
-            Op::Write { buffer: w(0), offset: w(1), data: &p[12..] }
+            Op::Write {
+                buffer: w(0),
+                offset: w(1),
+                data: &p[12..],
+            }
         }
         TAG_COPY => {
             need(20)?;
             buffer_ok(w(0))?;
             buffer_ok(w(2))?;
-            Op::Copy { from: w(0), from_offset: w(1), to: w(2), to_offset: w(3), bytes: w(4) }
+            Op::Copy {
+                from: w(0),
+                from_offset: w(1),
+                to: w(2),
+                to_offset: w(3),
+                bytes: w(4),
+            }
         }
         TAG_BATCH => {
             need(12)?;
-            Op::Batch { dynamic_offset: w(0), groups_x: w(1), groups_y: w(2) }
+            Op::Batch {
+                dynamic_offset: w(0),
+                groups_x: w(1),
+                groups_y: w(2),
+            }
         }
         TAG_RECORD => {
             need(12)?;
             if w(0) != DHDR_P_LOCAL_COPY && w(0) != DHDR_P_SCANOUT {
-                return Err(format!("RECORD names pipeline {} (1 local_copy, 2 scanout)", w(0)));
+                return Err(format!(
+                    "RECORD names pipeline {} (1 local_copy, 2 scanout)",
+                    w(0)
+                ));
             }
-            Op::Record { pipeline: w(0), x_word: w(1), y_word: w(2) }
+            Op::Record {
+                pipeline: w(0),
+                x_word: w(1),
+                y_word: w(2),
+            }
         }
         TAG_SUBMIT => {
             need(0)?;
@@ -326,11 +407,16 @@ fn decode(tag: u32, p: &[u8]) -> Result<Op<'_>, String> {
         }
         TAG_READ => {
             if p.len() < READ_HEAD {
-                return Err(format!("READ payload is {} bytes, shorter than its {READ_HEAD}-byte head", p.len()));
+                return Err(format!(
+                    "READ payload is {} bytes, shorter than its {READ_HEAD}-byte head",
+                    p.len()
+                ));
             }
             let buffer = w(0);
             if buffer != DHDR_B_READBACK && buffer != DHDR_B_STAGED {
-                return Err(format!("READ of buffer {buffer} (7 readback or 8 staged only)"));
+                return Err(format!(
+                    "READ of buffer {buffer} (7 readback or 8 staged only)"
+                ));
             }
             let mut want = [0u32; 16];
             for (i, v) in want.iter_mut().enumerate() {
@@ -342,11 +428,19 @@ fn decode(tag: u32, p: &[u8]) -> Result<Op<'_>, String> {
                 0 => need(READ_HEAD)?,
                 r => return Err(format!("READ result {r} (1 ok or 0 failed only)")),
             }
-            Op::Read { buffer, want, result, pages: &p[READ_HEAD..] }
+            Op::Read {
+                buffer,
+                want,
+                result,
+                pages: &p[READ_HEAD..],
+            }
         }
         TAG_CAPTURE => {
             if p.len() < 8 {
-                return Err(format!("CAPTURE payload is {} bytes, shorter than its 8-byte head", p.len()));
+                return Err(format!(
+                    "CAPTURE payload is {} bytes, shorter than its 8-byte head",
+                    p.len()
+                ));
             }
             let (width, height) = (w(0), w(1));
             let pixels = width as u64 * height as u64;
@@ -354,7 +448,11 @@ fn decode(tag: u32, p: &[u8]) -> Result<Op<'_>, String> {
                 return Err(format!("CAPTURE of {width} x {height}"));
             }
             need(8 + pixels as usize * 4)?;
-            Op::Capture { width, height, pixels: &p[8..] }
+            Op::Capture {
+                width,
+                height,
+                pixels: &p[8..],
+            }
         }
         TAG_DESTROY => {
             need(0)?;
@@ -390,7 +488,13 @@ enum Next {
 
 impl<'r> Records<'r> {
     fn new(r: &'r mut dyn Read, header_bytes: u32) -> Records<'r> {
-        Records { r, offset: header_bytes as u64, fnv: FNV_BASIS, index: 0, payload: Vec::new() }
+        Records {
+            r,
+            offset: header_bytes as u64,
+            fnv: FNV_BASIS,
+            index: 0,
+            payload: Vec::new(),
+        }
     }
 
     /// The next record (its payload in `self.payload`, padding checked and stripped).
@@ -398,13 +502,18 @@ impl<'r> Records<'r> {
         let at = self.offset;
         let mut prefix = [0u8; 8];
         if !read_full(self.r, &mut prefix)? {
-            return Err(format!("truncated: no END (record {} at byte {at})", self.index));
+            return Err(format!(
+                "truncated: no END (record {} at byte {at})",
+                self.index
+            ));
         }
         let tag = le32(&prefix, 0);
         let bytes = le32(&prefix, 4) as u64;
         if tag == TAG_END {
             if bytes as usize != END_PAYLOAD {
-                return Err(format!("END at byte {at} has a {bytes}-byte payload, must be {END_PAYLOAD}"));
+                return Err(format!(
+                    "END at byte {at} has a {bytes}-byte payload, must be {END_PAYLOAD}"
+                ));
             }
             self.payload.resize(END_PAYLOAD, 0);
             if !read_full(self.r, &mut self.payload)? {
@@ -420,11 +529,18 @@ impl<'r> Records<'r> {
         let padded = (bytes as usize + 3) & !3;
         self.payload.resize(padded, 0);
         if !read_full(self.r, &mut self.payload)? {
-            return Err(format!("truncated: record {} ({}) at byte {at} runs past the end of the file",
-                               self.index, tag_name(tag)));
+            return Err(format!(
+                "truncated: record {} ({}) at byte {at} runs past the end of the file",
+                self.index,
+                tag_name(tag)
+            ));
         }
         if self.payload[bytes as usize..].iter().any(|&b| b != 0) {
-            return Err(format!("record {} ({}) at byte {at}: nonzero padding", self.index, tag_name(tag)));
+            return Err(format!(
+                "record {} ({}) at byte {at}: nonzero padding",
+                self.index,
+                tag_name(tag)
+            ));
         }
         self.fnv = fnv1a(self.fnv, &prefix);
         self.fnv = fnv1a(self.fnv, &self.payload);
@@ -450,12 +566,16 @@ fn verify(r: &mut dyn Read) -> Result<(Header, Totals), Failure> {
                     *c = le32(e, 16 + 4 * i);
                 }
                 if records != t.records {
-                    return Err(Failure::Invalid(format!("END at byte {offset} says {records} records, the trace has {}",
-                                                        t.records)));
+                    return Err(Failure::Invalid(format!(
+                        "END at byte {offset} says {records} records, the trace has {}",
+                        t.records
+                    )));
                 }
                 if counts != t.counts {
-                    return Err(Failure::Invalid(format!("END at byte {offset}: per-tag counts {counts:?}, the trace has {:?}",
-                                                        t.counts)));
+                    return Err(Failure::Invalid(format!(
+                        "END at byte {offset}: per-tag counts {counts:?}, the trace has {:?}",
+                        t.counts
+                    )));
                 }
                 if fnv != recs.fnv {
                     return Err(Failure::Invalid(format!("END at byte {offset}: fnv {fnv:#018x}, the records hash to {:#018x} \
@@ -463,20 +583,28 @@ fn verify(r: &mut dyn Read) -> Result<(Header, Totals), Failure> {
                 }
                 let mut extra = [0u8; 1];
                 if read_full(recs.r, &mut extra).map_err(Failure::Invalid)? {
-                    return Err(Failure::Invalid(format!("bytes after END (at byte {})", recs.offset)));
+                    return Err(Failure::Invalid(format!(
+                        "bytes after END (at byte {})",
+                        recs.offset
+                    )));
                 }
                 return Ok((h, t));
             }
             Next::Record { tag, offset } => {
                 let index = recs.index - 1;
                 if t.destroyed {
-                    return Err(Failure::Invalid(format!("record {index} ({}) at byte {offset} comes after DESTROY",
-                                                        tag_name(tag))));
+                    return Err(Failure::Invalid(format!(
+                        "record {index} ({}) at byte {offset} comes after DESTROY",
+                        tag_name(tag)
+                    )));
                 }
-                let op = decode(tag, &recs.payload)
-                    .map_err(|e| Failure::Invalid(format!("record {index} at byte {offset}: {e}")))?;
+                let op = decode(tag, &recs.payload).map_err(|e| {
+                    Failure::Invalid(format!("record {index} at byte {offset}: {e}"))
+                })?;
                 match op {
-                    Op::Read { result: 1, want, .. } => t.read_pages += want_pages(&want) as u64,
+                    Op::Read {
+                        result: 1, want, ..
+                    } => t.read_pages += want_pages(&want) as u64,
                     Op::Destroy => t.destroyed = true,
                     _ => {}
                 }
@@ -502,7 +630,14 @@ fn print_totals(t: &Totals) {
 /// The exact device ops a trace replays through (`dhd_render.h`'s `dhdr_exact_*`).
 trait Seam {
     fn write(&mut self, buffer: u32, offset: u32, data: &[u8]) -> Result<(), String>;
-    fn copy(&mut self, from: u32, from_offset: u32, to: u32, to_offset: u32, bytes: u32) -> Result<(), String>;
+    fn copy(
+        &mut self,
+        from: u32,
+        from_offset: u32,
+        to: u32,
+        to_offset: u32,
+        bytes: u32,
+    ) -> Result<(), String>;
     fn batch(&mut self, dynamic_offset: u32, groups_x: u32, groups_y: u32) -> Result<(), String>;
     fn record(&mut self, pipeline: u32, x_word: u32, y_word: u32) -> Result<(), String>;
     fn submit(&mut self) -> Result<(), String>;
@@ -552,11 +687,24 @@ impl Seam for DeviceSeam {
         let x = self.live()?;
         // SAFETY: x is live; data holds data.len() bytes (decode checked it equals the record's count).
         unsafe {
-            dhd_render::ffi::dhdr_exact_write(x, buffer, offset, data.as_ptr() as *const c_void, data.len() as u32)
+            dhd_render::ffi::dhdr_exact_write(
+                x,
+                buffer,
+                offset,
+                data.as_ptr() as *const c_void,
+                data.len() as u32,
+            )
         };
         Ok(())
     }
-    fn copy(&mut self, from: u32, from_offset: u32, to: u32, to_offset: u32, bytes: u32) -> Result<(), String> {
+    fn copy(
+        &mut self,
+        from: u32,
+        from_offset: u32,
+        to: u32,
+        to_offset: u32,
+        bytes: u32,
+    ) -> Result<(), String> {
         let x = self.live()?;
         // SAFETY: x is live.
         unsafe { dhd_render::ffi::dhdr_exact_copy(x, from, from_offset, to, to_offset, bytes) };
@@ -588,7 +736,14 @@ impl Seam for DeviceSeam {
             return Ok(0);
         }
         // SAFETY: x is live and held by the begin above; image is the 4 MiB page image.
-        let r = unsafe { dhd_render::ffi::dhdr_exact_read_finish(x, buffer, want.as_ptr(), image.as_mut_ptr() as *mut c_void) };
+        let r = unsafe {
+            dhd_render::ffi::dhdr_exact_read_finish(
+                x,
+                buffer,
+                want.as_ptr(),
+                image.as_mut_ptr() as *mut c_void,
+            )
+        };
         Ok(if r == 1 { 1 } else { 0 })
     }
     fn capture(&mut self) -> Result<(u32, u32, Vec<u8>), String> {
@@ -611,8 +766,10 @@ impl Seam for DeviceSeam {
     fn destroy(&mut self) -> Result<(), String> {
         let x = self.live()?;
         if let Some(s) = self.stats() {
-            println!("replay: stats: {} submits, {} reads, {} dispatches, {} bytes written, {} copies",
-                     s.submits, s.reads, s.dispatches, s.bytes_written, s.copies);
+            println!(
+                "replay: stats: {} submits, {} reads, {} dispatches, {} bytes written, {} copies",
+                s.submits, s.reads, s.dispatches, s.bytes_written, s.copies
+            );
         }
         // SAFETY: x is live; it is given up here.
         unsafe { dhd_render::ffi::dhdr_exact_destroy(x) };
@@ -642,13 +799,26 @@ struct ModelSeam {
 
 impl ModelSeam {
     fn new() -> ModelSeam {
-        ModelSeam { buffers: BUFFER_BYTES.iter().map(|&n| vec![0u8; n]).collect(), pending: Vec::new(), destroyed: false }
+        ModelSeam {
+            buffers: BUFFER_BYTES.iter().map(|&n| vec![0u8; n]).collect(),
+            pending: Vec::new(),
+            destroyed: false,
+        }
     }
-    fn range(&self, buffer: u32, offset: u32, bytes: u32) -> Result<std::ops::Range<usize>, String> {
-        let size = *BUFFER_BYTES.get(buffer as usize).ok_or(format!("model: no buffer {buffer}"))?;
+    fn range(
+        &self,
+        buffer: u32,
+        offset: u32,
+        bytes: u32,
+    ) -> Result<std::ops::Range<usize>, String> {
+        let size = *BUFFER_BYTES
+            .get(buffer as usize)
+            .ok_or(format!("model: no buffer {buffer}"))?;
         let (a, b) = (offset as usize, offset as usize + bytes as usize);
         if b > size {
-            return Err(format!("model: buffer {buffer} [{a}, {b}) past its {size} bytes"));
+            return Err(format!(
+                "model: buffer {buffer} [{a}, {b}) past its {size} bytes"
+            ));
         }
         Ok(a..b)
     }
@@ -668,7 +838,14 @@ impl Seam for ModelSeam {
         self.buffers[buffer as usize][r].copy_from_slice(data);
         Ok(())
     }
-    fn copy(&mut self, from: u32, from_offset: u32, to: u32, to_offset: u32, bytes: u32) -> Result<(), String> {
+    fn copy(
+        &mut self,
+        from: u32,
+        from_offset: u32,
+        to: u32,
+        to_offset: u32,
+        bytes: u32,
+    ) -> Result<(), String> {
         self.alive()?;
         self.range(from, from_offset, bytes)?;
         self.range(to, to_offset, bytes)?;
@@ -722,21 +899,31 @@ struct Compared {
 
 /// The first differing 32-bit word of two equal-length byte slices.
 fn first_word_diff(a: &[u8], b: &[u8]) -> Option<(usize, u32, u32)> {
-    a.chunks(4).zip(b.chunks(4)).enumerate().find(|(_, (x, y))| x != y).map(|(i, (x, y))| {
-        let word = |c: &[u8]| {
-            let mut w = [0u8; 4];
-            w[..c.len()].copy_from_slice(c);
-            u32::from_le_bytes(w)
-        };
-        (i, word(x), word(y))
-    })
+    a.chunks(4)
+        .zip(b.chunks(4))
+        .enumerate()
+        .find(|(_, (x, y))| x != y)
+        .map(|(i, (x, y))| {
+            let word = |c: &[u8]| {
+                let mut w = [0u8; 4];
+                w[..c.len()].copy_from_slice(c);
+                u32::from_le_bytes(w)
+            };
+            (i, word(x), word(y))
+        })
 }
 
 /// The replay pass: every op in order on `seam`, every READ and CAPTURE compared. The trace has
 /// passed `verify` already.
 /// `mark` starts every mismatch line: `FAIL` in a real run, a neutral word in the selftest (whose
 /// planted failures are expected, so they must not read as a failing run to `gs_verdict.py`).
-fn run(r: &mut dyn Read, seam: &mut dyn Seam, all: bool, t: &Totals, mark: &str) -> (Compared, Option<Failure>) {
+fn run(
+    r: &mut dyn Read,
+    seam: &mut dyn Seam,
+    all: bool,
+    t: &Totals,
+    mark: &str,
+) -> (Compared, Option<Failure>) {
     let mut c = Compared::default();
     let fail_now = |c: &Compared, text: String| (c.clone(), Some(Failure::Mismatch(text)));
     let h = match read_header(r) {
@@ -751,38 +938,81 @@ fn run(r: &mut dyn Read, seam: &mut dyn Seam, all: bool, t: &Totals, mark: &str)
         let (tag, offset) = match recs.next() {
             Ok(Next::Record { tag, offset }) => (tag, offset),
             Ok(Next::End { .. }) => break,
-            Err(e) => return (c, Some(Failure::Invalid(format!("the trace changed between the passes: {e}")))),
+            Err(e) => {
+                return (
+                    c,
+                    Some(Failure::Invalid(format!(
+                        "the trace changed between the passes: {e}"
+                    ))),
+                )
+            }
         };
         let index = recs.index - 1;
         let op = match decode(tag, &recs.payload) {
             Ok(op) => op,
-            Err(e) => return (c, Some(Failure::Invalid(format!("the trace changed between the passes: {e}")))),
+            Err(e) => {
+                return (
+                    c,
+                    Some(Failure::Invalid(format!(
+                        "the trace changed between the passes: {e}"
+                    ))),
+                )
+            }
         };
         let mut mismatch = |c: &mut Compared, text: String| {
-            println!("{mark} record {index} (byte {offset}) {}: {text}", tag_name(tag));
+            println!(
+                "{mark} record {index} (byte {offset}) {}: {text}",
+                tag_name(tag)
+            );
             c.mismatches += 1;
             if first.is_none() {
                 first = Some(format!("record {index} {}: {text}", tag_name(tag)));
             }
         };
         let step = match op {
-            Op::Write { buffer, offset, data } => seam.write(buffer, offset, data),
-            Op::Copy { from, from_offset, to, to_offset, bytes } => seam.copy(from, from_offset, to, to_offset, bytes),
-            Op::Batch { dynamic_offset, groups_x, groups_y } => seam.batch(dynamic_offset, groups_x, groups_y),
-            Op::Record { pipeline, x_word, y_word } => seam.record(pipeline, x_word, y_word),
+            Op::Write {
+                buffer,
+                offset,
+                data,
+            } => seam.write(buffer, offset, data),
+            Op::Copy {
+                from,
+                from_offset,
+                to,
+                to_offset,
+                bytes,
+            } => seam.copy(from, from_offset, to, to_offset, bytes),
+            Op::Batch {
+                dynamic_offset,
+                groups_x,
+                groups_y,
+            } => seam.batch(dynamic_offset, groups_x, groups_y),
+            Op::Record {
+                pipeline,
+                x_word,
+                y_word,
+            } => seam.record(pipeline, x_word, y_word),
             Op::Submit => seam.submit(),
             Op::Destroy => {
                 destroyed = true;
                 seam.destroy()
             }
-            Op::Read { buffer, want, result, pages } => {
+            Op::Read {
+                buffer,
+                want,
+                result,
+                pages,
+            } => {
                 image.fill(0);
                 match seam.read(buffer, &want, &mut image) {
                     Err(e) => Err(e),
                     Ok(got) => {
                         c.reads += 1;
                         if got != result {
-                            mismatch(&mut c, format!("buffer {buffer}: result {got}, the trace has {result}"));
+                            mismatch(
+                                &mut c,
+                                format!("buffer {buffer}: result {got}, the trace has {result}"),
+                            );
                         } else if result == 1 {
                             let mut n = 0;
                             let mut bad_pages = 0u32;
@@ -793,7 +1023,9 @@ fn run(r: &mut dyn Read, seam: &mut dyn Seam, all: bool, t: &Totals, mark: &str)
                                 let expect = &pages[n * PAGE..(n + 1) * PAGE];
                                 n += 1;
                                 c.pages += 1;
-                                if let Some((word, e, g)) = first_word_diff(expect, &image[page * PAGE..(page + 1) * PAGE]) {
+                                if let Some((word, e, g)) =
+                                    first_word_diff(expect, &image[page * PAGE..(page + 1) * PAGE])
+                                {
                                     bad_pages += 1;
                                     if bad_pages == 1 || all {
                                         mismatch(&mut c, format!("buffer {buffer} page {page}: first differing word {word} \
@@ -810,22 +1042,38 @@ fn run(r: &mut dyn Read, seam: &mut dyn Seam, all: bool, t: &Totals, mark: &str)
                     }
                 }
             }
-            Op::Capture { width, height, pixels } => match seam.capture() {
+            Op::Capture {
+                width,
+                height,
+                pixels,
+            } => match seam.capture() {
                 Err(e) => Err(e),
                 Ok((w, h, got)) => {
                     c.captures += 1;
                     if (w, h) != (width, height) {
-                        mismatch(&mut c, format!("size {w} x {h}, the trace has {width} x {height}"));
+                        mismatch(
+                            &mut c,
+                            format!("size {w} x {h}, the trace has {width} x {height}"),
+                        );
                     } else if let Some((word, e, g)) = first_word_diff(pixels, &got) {
-                        mismatch(&mut c, format!("pixel {word} (x {}, y {}): trace {e:#010x}, replay {g:#010x}",
-                                                 word % width.max(1) as usize, word / width.max(1) as usize));
+                        mismatch(
+                            &mut c,
+                            format!(
+                                "pixel {word} (x {}, y {}): trace {e:#010x}, replay {g:#010x}",
+                                word % width.max(1) as usize,
+                                word / width.max(1) as usize
+                            ),
+                        );
                     }
                     Ok(())
                 }
             },
         };
         if let Err(e) = step {
-            println!("{mark} record {index} (byte {offset}) {}: {e}", tag_name(tag));
+            println!(
+                "{mark} record {index} (byte {offset}) {}: {e}",
+                tag_name(tag)
+            );
             return fail_now(&c, format!("record {index} {}: {e}", tag_name(tag)));
         }
         if c.mismatches > 0 && !all {
@@ -837,11 +1085,23 @@ fn run(r: &mut dyn Read, seam: &mut dyn Seam, all: bool, t: &Totals, mark: &str)
             return fail_now(&c, format!("destroy at the end: {e}"));
         }
     }
-    println!("compared {} reads ({} pages), {} captures", c.reads, c.pages, c.captures);
+    println!(
+        "compared {} reads ({} pages), {} captures",
+        c.reads, c.pages, c.captures
+    );
     if let Some(f) = first {
-        return (c.clone(), Some(Failure::Mismatch(format!("{} mismatch(es); first: {f}", c.mismatches))));
+        return (
+            c.clone(),
+            Some(Failure::Mismatch(format!(
+                "{} mismatch(es); first: {f}",
+                c.mismatches
+            ))),
+        );
     }
-    let (reads, captures) = (t.counts[TAG_READ as usize] as u64, t.counts[TAG_CAPTURE as usize] as u64);
+    let (reads, captures) = (
+        t.counts[TAG_READ as usize] as u64,
+        t.counts[TAG_CAPTURE as usize] as u64,
+    );
     if c.reads != reads || c.pages != t.read_pages || c.captures != captures {
         return fail_now(&c, format!("compared {} reads ({} pages), {} captures; the trace has {reads} ({} pages), {captures}",
                                     c.reads, c.pages, c.captures, t.read_pages));
@@ -854,8 +1114,13 @@ type MakeSeam<'m> = dyn FnMut(&Header) -> Result<Box<dyn Seam>, Failure> + 'm;
 
 /// Both passes over a trace `open` gives (twice), replayed on the seam `make` returns (after the
 /// integrity pass, so a bad trace never reaches the device).
-fn replay(open: &dyn Fn() -> Result<Box<dyn Read>, String>, path: &str, selftest: bool, all: bool,
-          make: &mut MakeSeam) -> Result<Compared, Failure> {
+fn replay(
+    open: &dyn Fn() -> Result<Box<dyn Read>, String>,
+    path: &str,
+    selftest: bool,
+    all: bool,
+    make: &mut MakeSeam,
+) -> Result<Compared, Failure> {
     let mut r = open().map_err(Failure::Refused)?;
     let (h, t) = verify(&mut *r)?;
     if !selftest {
@@ -865,7 +1130,17 @@ fn replay(open: &dyn Fn() -> Result<Box<dyn Read>, String>, path: &str, selftest
     drop(r);
     let mut seam = make(&h)?;
     let mut r = open().map_err(Failure::Refused)?;
-    let (c, f) = run(&mut *r, &mut *seam, all, &t, if selftest { "selftest: planted:" } else { "FAIL" });
+    let (c, f) = run(
+        &mut *r,
+        &mut *seam,
+        all,
+        &t,
+        if selftest {
+            "selftest: planted:"
+        } else {
+            "FAIL"
+        },
+    );
     match f {
         Some(f) => Err(f),
         None => Ok(c),
@@ -885,7 +1160,10 @@ struct DeviceArgs {
 
 fn device_init(d: &DeviceArgs) -> Result<(), Failure> {
     let dxc = match &d.dxc {
-        Some(p) => Some(CString::new(p.as_str()).map_err(|_| Failure::Refused("--dxc path has a NUL".into()))?),
+        Some(p) => Some(
+            CString::new(p.as_str())
+                .map_err(|_| Failure::Refused("--dxc path has a NUL".into()))?,
+        ),
         None => None,
     };
     let desc = DhdrDeviceDesc {
@@ -899,15 +1177,26 @@ fn device_init(d: &DeviceArgs) -> Result<(), Failure> {
     };
     // SAFETY: desc is a valid descriptor; dxc outlives the call.
     if unsafe { dhd_render::ffi::dhdr_device_init(&desc) } != 1 {
-        return Err(Failure::Error("dhdr_device_init failed (no device; not a pass)".into()));
+        return Err(Failure::Error(
+            "dhdr_device_init failed (no device; not a pass)".into(),
+        ));
     }
     // SAFETY: both return static NUL-terminated strings.
     let (name, version) = unsafe {
-        (CStr::from_ptr(dhd_render::ffi::dhdr_adapter_name()).to_string_lossy().into_owned(),
-         CStr::from_ptr(dhd_render::ffi::dhdr_version()).to_string_lossy().into_owned())
+        (
+            CStr::from_ptr(dhd_render::ffi::dhdr_adapter_name())
+                .to_string_lossy()
+                .into_owned(),
+            CStr::from_ptr(dhd_render::ffi::dhdr_version())
+                .to_string_lossy()
+                .into_owned(),
+        )
     };
-    println!("replay: {version} on '{name}' (flags {:#x}, compiler {})", d.flags,
-             if d.dxc.is_some() { "DXC" } else { "FXC" });
+    println!(
+        "replay: {version} on '{name}' (flags {:#x}, compiler {})",
+        d.flags,
+        if d.dxc.is_some() { "DXC" } else { "FXC" }
+    );
     Ok(())
 }
 
@@ -915,20 +1204,31 @@ fn device_init(d: &DeviceArgs) -> Result<(), Failure> {
 /// fault, finding 084 section 10.5.6), prints any adapter difference (never refuses on it).
 fn device_seam(d: &DeviceArgs, h: &Header) -> Result<Box<dyn Seam>, Failure> {
     if d.flags & DHDR_DEV_FALLBACK != 0 && h.raster_flags & DHDR_RASTER_EARLY_DEPTH != 0 {
-        return Err(Failure::Refused("the trace was recorded with early depth (raster_flags bit 1); the fallback \
-                                     adapter (WARP) must replay a trace without it".into()));
+        return Err(Failure::Refused(
+            "the trace was recorded with early depth (raster_flags bit 1); the fallback \
+                                     adapter (WARP) must replay a trace without it"
+                .into(),
+        ));
     }
     device_init(d)?;
     // SAFETY: returns a static NUL-terminated string.
-    let name = unsafe { CStr::from_ptr(dhd_render::ffi::dhdr_adapter_name()) }.to_string_lossy().into_owned();
+    let name = unsafe { CStr::from_ptr(dhd_render::ffi::dhdr_adapter_name()) }
+        .to_string_lossy()
+        .into_owned();
     if name != h.adapter {
         println!("replay: adapter differs from the recording ('{}' there); exact results must still match", h.adapter);
     }
     let api = if d.flags & DHDR_DEV_VULKAN != 0 { 2 } else { 1 };
     if api != h.api {
-        println!("replay: API {} here, {} in the recording", api_name(api), api_name(h.api));
+        println!(
+            "replay: API {} here, {} in the recording",
+            api_name(api),
+            api_name(h.api)
+        );
     }
-    Ok(Box::new(DeviceSeam::create(h.raster_flags).map_err(Failure::Error)?))
+    Ok(Box::new(
+        DeviceSeam::create(h.raster_flags).map_err(Failure::Error)?,
+    ))
 }
 
 // ------------------------------------------------------------------------------------ selftest
@@ -954,7 +1254,10 @@ impl Synthetic {
     }
 
     fn header(&self) -> Vec<u8> {
-        let (adapter, source) = (b"selftest model".as_slice(), b"optrace_replay selftest".as_slice());
+        let (adapter, source) = (
+            b"selftest model".as_slice(),
+            b"optrace_replay selftest".as_slice(),
+        );
         let bytes = (HEADER_FIXED + 4 + adapter.len() + 4 + source.len() + 3) & !3;
         let mut h = vec![0u8; bytes];
         h[..8].copy_from_slice(&self.magic);
@@ -1056,7 +1359,12 @@ const CAPTURE_AT: usize = 9;
 ///   (over r5); r7 COPY vram page 5 -> staged page 5; r8 READ staged page 5 = C.
 /// - r9 CAPTURE 0 x 0 (no display texture); r10 SUBMIT (nothing recorded); r11 DESTROY.
 fn base_trace() -> (Synthetic, Vec<u8>) {
-    let mut s = Synthetic { version: VERSION, magic: *MAGIC, raster_flags: 0, records: Vec::new() };
+    let mut s = Synthetic {
+        version: VERSION,
+        magic: *MAGIC,
+        raster_flags: 0,
+        records: Vec::new(),
+    };
     let a = pattern(1, 2 * PAGE);
     let b = pattern(2, 2 * PAGE);
     let c = pattern(3, PAGE);
@@ -1066,13 +1374,28 @@ fn base_trace() -> (Synthetic, Vec<u8>) {
         p
     };
     s.push(TAG_WRITE, write(DHDR_B_UPLOAD, 0, &a));
-    s.push(TAG_COPY, words(&[DHDR_B_UPLOAD, 0, DHDR_B_READBACK, 0, 2 * PAGE as u32]));
+    s.push(
+        TAG_COPY,
+        words(&[DHDR_B_UPLOAD, 0, DHDR_B_READBACK, 0, 2 * PAGE as u32]),
+    );
     s.push(TAG_SUBMIT, Vec::new());
     s.push(TAG_WRITE, write(DHDR_B_UPLOAD, 0, &b));
     s.push(TAG_READ, read_payload(DHDR_B_READBACK, &[0, 1], &a));
-    s.push(TAG_WRITE, write(DHDR_B_VRAM, 5 * PAGE as u32 + 1, &[0xAA, 0xBB, 0xCC]));
+    s.push(
+        TAG_WRITE,
+        write(DHDR_B_VRAM, 5 * PAGE as u32 + 1, &[0xAA, 0xBB, 0xCC]),
+    );
     s.push(TAG_WRITE, write(DHDR_B_VRAM, 5 * PAGE as u32, &c));
-    s.push(TAG_COPY, words(&[DHDR_B_VRAM, 5 * PAGE as u32, DHDR_B_STAGED, 5 * PAGE as u32, PAGE as u32]));
+    s.push(
+        TAG_COPY,
+        words(&[
+            DHDR_B_VRAM,
+            5 * PAGE as u32,
+            DHDR_B_STAGED,
+            5 * PAGE as u32,
+            PAGE as u32,
+        ]),
+    );
     s.push(TAG_READ, read_payload(DHDR_B_STAGED, &[5], &c));
     s.push(TAG_CAPTURE, words(&[0, 0]));
     s.push(TAG_SUBMIT, Vec::new());
@@ -1104,19 +1427,35 @@ fn cases() -> Vec<(&'static str, Vec<u8>, Expect)> {
     let mut m = base.clone();
     let at = READ_HEAD + PAGE + 100;
     m.records[READ_AT].1[at] ^= 0x40;
-    v.push(("corrupted READ page, END left stale", m.stale(&base), Expect::Invalid));
-    v.push(("corrupted READ page, resealed", m.sealed(), Expect::Mismatch));
+    v.push((
+        "corrupted READ page, END left stale",
+        m.stale(&base),
+        Expect::Invalid,
+    ));
+    v.push((
+        "corrupted READ page, resealed",
+        m.sealed(),
+        Expect::Mismatch,
+    ));
 
     // A reordered SUBMIT: r2 moved after r3.
     let mut m = base.clone();
     m.records.swap(SUBMIT_AT, SUBMIT_AT + 1);
-    v.push(("reordered SUBMIT, END left stale", m.stale(&base), Expect::Invalid));
+    v.push((
+        "reordered SUBMIT, END left stale",
+        m.stale(&base),
+        Expect::Invalid,
+    ));
     v.push(("reordered SUBMIT, resealed", m.sealed(), Expect::Mismatch));
     // ... and that resealed trace with the READ bytes it now really gives (B) passes: the model
     // follows the ordering, it does not just reject any change.
     let mut m2 = m.clone();
     m2.records[READ_AT].1 = read_payload(DHDR_B_READBACK, &[0, 1], &b);
-    v.push(("reordered SUBMIT with its true READ bytes, resealed", m2.sealed(), Expect::Pass));
+    v.push((
+        "reordered SUBMIT with its true READ bytes, resealed",
+        m2.sealed(),
+        Expect::Pass,
+    ));
 
     let mut t = base.sealed();
     t.truncate(t.len() - 4);
@@ -1134,7 +1473,8 @@ fn cases() -> Vec<(&'static str, Vec<u8>, Expect)> {
 
     let mut t = base.sealed();
     let n = t.len();
-    t[n - END_PAYLOAD..n - END_PAYLOAD + 8].copy_from_slice(&(base.records.len() as u64 + 1).to_le_bytes());
+    t[n - END_PAYLOAD..n - END_PAYLOAD + 8]
+        .copy_from_slice(&(base.records.len() as u64 + 1).to_le_bytes());
     v.push(("END record count off by one", t, Expect::Invalid));
     let mut t = base.sealed();
     let n = t.len();
@@ -1142,11 +1482,19 @@ fn cases() -> Vec<(&'static str, Vec<u8>, Expect)> {
     let c_copy = n - END_PAYLOAD + 16 + 4 * TAG_COPY as usize;
     t[c_submit] = t[c_submit].wrapping_sub(1);
     t[c_copy] = t[c_copy].wrapping_add(1);
-    v.push(("END per-tag counts swapped (same total)", t, Expect::Invalid));
+    v.push((
+        "END per-tag counts swapped (same total)",
+        t,
+        Expect::Invalid,
+    ));
 
     let mut m = base.clone();
     m.records.remove(CAPTURE_AT);
-    v.push(("dropped CAPTURE, END left stale", m.stale(&base), Expect::Invalid));
+    v.push((
+        "dropped CAPTURE, END left stale",
+        m.stale(&base),
+        Expect::Invalid,
+    ));
 
     let mut m = base.clone();
     m.records[ODD_WRITE_AT].2[0] = 1;
@@ -1168,22 +1516,38 @@ fn cases() -> Vec<(&'static str, Vec<u8>, Expect)> {
     m.records[READ_AT].1 = read_payload(DHDR_B_READBACK, &[0, 1], &[]);
     m.records[READ_AT].1.truncate(READ_HEAD);
     m.records[READ_AT].1[4 * 17..4 * 18].copy_from_slice(&0u32.to_le_bytes());
-    v.push(("READ result 0 where the replay reads, resealed", m.sealed(), Expect::Mismatch));
+    v.push((
+        "READ result 0 where the replay reads, resealed",
+        m.sealed(),
+        Expect::Mismatch,
+    ));
 
     let mut m = base.clone();
     m.records[READ_AT].1[0..4].copy_from_slice(&DHDR_B_VRAM.to_le_bytes());
-    v.push(("READ of the vram buffer, resealed", m.sealed(), Expect::Invalid));
+    v.push((
+        "READ of the vram buffer, resealed",
+        m.sealed(),
+        Expect::Invalid,
+    ));
 
     let mut m = base.clone();
     let last = m.records.len() - 1;
     m.records.swap(last, last - 1);
-    v.push(("a record after DESTROY, resealed", m.sealed(), Expect::Invalid));
+    v.push((
+        "a record after DESTROY, resealed",
+        m.sealed(),
+        Expect::Invalid,
+    ));
 
     let mut m = base.clone();
     let mut cap = words(&[2, 1]);
     cap.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
     m.records[CAPTURE_AT].1 = cap;
-    v.push(("CAPTURE size the replay does not give, resealed", m.sealed(), Expect::Mismatch));
+    v.push((
+        "CAPTURE size the replay does not give, resealed",
+        m.sealed(),
+        Expect::Mismatch,
+    ));
 
     let mut m = base.clone();
     m.records[CAPTURE_AT].1 = words(&[2, 0]);
@@ -1224,7 +1588,11 @@ fn selftest(gpu: Option<&DeviceArgs>) -> i32 {
             failed += 1;
         }
     };
-    let runs: Vec<(&str, bool)> = if gpu.is_some() { vec![("model", false), ("device", true)] } else { vec![("model", false)] };
+    let runs: Vec<(&str, bool)> = if gpu.is_some() {
+        vec![("model", false), ("device", true)]
+    } else {
+        vec![("model", false)]
+    };
     for (seam_name, on_device) in runs {
         for (name, bytes, expect) in cases() {
             // On the device only the cases that reach the replay pass mean anything new.
@@ -1242,11 +1610,17 @@ fn selftest(gpu: Option<&DeviceArgs>) -> i32 {
                         None => Ok(Box::new(ModelSeam::new())),
                     }
                 };
-                println!("selftest: [{seam_name}{}] {name}", if all { ", --all" } else { "" });
+                println!(
+                    "selftest: [{seam_name}{}] {name}",
+                    if all { ", --all" } else { "" }
+                );
                 let r = replay(&|| Ok(open(&bytes)), name, true, all, &mut make);
                 let got = outcome(&r);
                 let detail = match &r {
-                    Ok(c) => format!("pass, compared {} reads ({} pages), {} captures", c.reads, c.pages, c.captures),
+                    Ok(c) => format!(
+                        "pass, compared {} reads ({} pages), {} captures",
+                        c.reads, c.pages, c.captures
+                    ),
                     Err(f) => format!("{} (exit {}): {}", f.kind(), f.code(), f.text()),
                 };
                 let mut ok = got == expect;
@@ -1261,23 +1635,35 @@ fn selftest(gpu: Option<&DeviceArgs>) -> i32 {
                 if expect == Expect::Mismatch && name.starts_with("reordered SUBMIT") {
                     ok &= matches!(&r, Err(Failure::Mismatch(t)) if t.contains("record 4 READ") && t.contains("page 0:"));
                 }
-                check(&format!("[{seam_name}{}] {name}", if all { ", --all" } else { "" }), ok,
-                      format!("expected {expect:?}, got {detail}"));
+                check(
+                    &format!("[{seam_name}{}] {name}", if all { ", --all" } else { "" }),
+                    ok,
+                    format!("expected {expect:?}, got {detail}"),
+                );
             }
         }
     }
     // The file path the real run uses: a base trace through a temporary file.
     let dir = std::env::temp_dir().join(format!("optrace_replay_selftest_{}", std::process::id()));
     let file = dir.join("base.optrace");
-    let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, base_trace().0.sealed()));
+    let written =
+        std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, base_trace().0.sealed()));
     match written {
-        Err(e) => check("file read", false, format!("cannot write {}: {e}", file.display())),
+        Err(e) => check(
+            "file read",
+            false,
+            format!("cannot write {}: {e}", file.display()),
+        ),
         Ok(()) => {
             let path = file.to_string_lossy().into_owned();
             let open = || -> Result<Box<dyn Read>, String> {
-                File::open(&file).map(|f| Box::new(BufReader::new(f)) as Box<dyn Read>).map_err(|e| e.to_string())
+                File::open(&file)
+                    .map(|f| Box::new(BufReader::new(f)) as Box<dyn Read>)
+                    .map_err(|e| e.to_string())
             };
-            let r = replay(&open, &path, false, false, &mut |_| Ok(Box::new(ModelSeam::new())));
+            let r = replay(&open, &path, false, false, &mut |_| {
+                Ok(Box::new(ModelSeam::new()))
+            });
             check("file read", outcome(&r) == Expect::Pass, format!("{r:?}"));
         }
     }
@@ -1310,9 +1696,15 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let mut path: Option<String> = None;
     let (mut self_test, mut gpu, mut all) = (false, false, false);
-    let mut d = DeviceArgs { log_level: DHDR_LOG_WARN, ..Default::default() };
+    let mut d = DeviceArgs {
+        log_level: DHDR_LOG_WARN,
+        ..Default::default()
+    };
     while let Some(a) = args.next() {
-        let mut value = |name: &str| args.next().unwrap_or_else(|| refuse(&format!("{name} needs a value")));
+        let mut value = |name: &str| {
+            args.next()
+                .unwrap_or_else(|| refuse(&format!("{name} needs a value")))
+        };
         match a.as_str() {
             "--selftest" => self_test = true,
             "--gpu" => gpu = true,
@@ -1335,12 +1727,16 @@ fn main() {
                 "fallback" => d.flags |= DHDR_DEV_FALLBACK,
                 v => {
                     let ids = v.split_once(':').and_then(|(a, b)| {
-                        Some((u32::from_str_radix(a.trim_start_matches("0x"), 16).ok()?,
-                              u32::from_str_radix(b.trim_start_matches("0x"), 16).ok()?))
+                        Some((
+                            u32::from_str_radix(a.trim_start_matches("0x"), 16).ok()?,
+                            u32::from_str_radix(b.trim_start_matches("0x"), 16).ok()?,
+                        ))
                     });
                     match ids {
                         Some((vendor, device)) => (d.vendor_id, d.device_id) = (vendor, device),
-                        None => refuse(&format!("--adapter {v}: hw, fallback or VVVV:DDDD (hex PCI ids)")),
+                        None => refuse(&format!(
+                            "--adapter {v}: hw, fallback or VVVV:DDDD (hex PCI ids)"
+                        )),
                     }
                 }
             },
@@ -1364,7 +1760,9 @@ fn main() {
     if gpu {
         refuse("--gpu is a --selftest option (a trace always replays on the device)");
     }
-    let Some(path) = path else { refuse("no trace given") };
+    let Some(path) = path else {
+        refuse("no trace given")
+    };
     let open = || -> Result<Box<dyn Read>, String> {
         File::open(&path)
             .map(|f| Box::new(BufReader::with_capacity(1 << 20, f)) as Box<dyn Read>)
@@ -1374,7 +1772,10 @@ fn main() {
     let r = replay(&open, &path, false, all, &mut make);
     match r {
         Ok(c) => {
-            println!("optrace_replay: PASS ({} reads, {} pages, {} captures byte-identical)", c.reads, c.pages, c.captures);
+            println!(
+                "optrace_replay: PASS ({} reads, {} pages, {} captures byte-identical)",
+                c.reads, c.pages, c.captures
+            );
             std::process::exit(0);
         }
         Err(f) => {

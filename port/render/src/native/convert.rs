@@ -87,12 +87,18 @@ impl Default for Converts {
 
 impl Converts {
     pub fn new() -> Converts {
-        Converts { slots: (0..CONVERTS).map(|_| None).collect(), runs: 0 }
+        Converts {
+            slots: (0..CONVERTS).map(|_| None).collect(),
+            runs: 0,
+        }
     }
 
     /// The size of converted texture `i` (0, 0 when it has none), for checks.
     pub fn size(&self, i: usize) -> (u32, u32) {
-        self.slots.get(i).and_then(|s| s.as_ref()).map_or((0, 0), |c| (c.w, c.h))
+        self.slots
+            .get(i)
+            .and_then(|s| s.as_ref())
+            .map_or((0, 0), |c| (c.w, c.h))
     }
 
     /// native_run_convert: rebuilds conversion `i` (`v`, with `base` its decoded texture's view
@@ -100,9 +106,17 @@ impl Converts {
     /// compute pass into `encoder` (no pass may be open on it). Returns the draw bind group, or
     /// None when the conversion can't run (size 0, a source without texture, `i` out of range).
     #[allow(clippy::too_many_arguments)]
-    pub fn run(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, arenas: &mut Arenas, o: &ConvertObjects,
-               i: usize, v: &DhdrConvert, base: Option<&wgpu::TextureView>,
-               sources: &[Option<ConvertSource>; 4]) -> Option<wgpu::BindGroup> {
+    pub fn run(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        arenas: &mut Arenas,
+        o: &ConvertObjects,
+        i: usize,
+        v: &DhdrConvert,
+        base: Option<&wgpu::TextureView>,
+        sources: &[Option<ConvertSource>; 4],
+    ) -> Option<wgpu::BindGroup> {
         let ready = self.prepare(gpu, arenas, o, i, v, base, sources)?;
         self.dispatch(gpu, encoder, arenas, o, std::slice::from_ref(&ready));
         Some(ready.draw)
@@ -111,8 +125,16 @@ impl Converts {
     /// `run` up to its compute pass: conversion `i`'s texture (made when its size changed), its
     /// constants in the arena and its bind groups. None when the conversion can't run.
     #[allow(clippy::too_many_arguments)]
-    pub fn prepare(&mut self, gpu: &Gpu, arenas: &mut Arenas, o: &ConvertObjects, i: usize, v: &DhdrConvert,
-                   base: Option<&wgpu::TextureView>, sources: &[Option<ConvertSource>; 4]) -> Option<Ready> {
+    pub fn prepare(
+        &mut self,
+        gpu: &Gpu,
+        arenas: &mut Arenas,
+        o: &ConvertObjects,
+        i: usize,
+        v: &DhdrConvert,
+        base: Option<&wgpu::TextureView>,
+        sources: &[Option<ConvertSource>; 4],
+    ) -> Option<Ready> {
         let (w, h) = (v.constants.size[0], v.constants.size[1]);
         if w == 0 || h == 0 || i >= CONVERTS {
             return None;
@@ -145,7 +167,11 @@ impl Converts {
             }
             let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
                 label: Some("native converted"),
-                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -160,11 +186,23 @@ impl Converts {
                 label: Some("native converted group"),
                 layout: o.texels_layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) },
-                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(o.texels_sampler) },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(o.texels_sampler),
+                    },
                 ],
             });
-            *slot = Some(Converted { _texture: texture, view, group, w, h });
+            *slot = Some(Converted {
+                _texture: texture,
+                view,
+                group,
+                w,
+                h,
+            });
         }
         let converted = slot.as_ref()?;
         let offset = arenas.constants(struct_bytes(&constants));
@@ -178,16 +216,46 @@ impl Converts {
                     size: wgpu::BufferSize::new(INVERSE_WORDS as u64 * 4),
                 }),
             },
-            wgpu::BindGroupEntry { binding: 1, resource: tv(base.unwrap_or(o.dummy_texels_view)) },
-            wgpu::BindGroupEntry { binding: 2, resource: tv(colour[0]) },
-            wgpu::BindGroupEntry { binding: 3, resource: tv(colour[1]) },
-            wgpu::BindGroupEntry { binding: 4, resource: tv(colour[2]) },
-            wgpu::BindGroupEntry { binding: 5, resource: tv(colour[3]) },
-            wgpu::BindGroupEntry { binding: 6, resource: tv(depth[0]) },
-            wgpu::BindGroupEntry { binding: 7, resource: tv(depth[1]) },
-            wgpu::BindGroupEntry { binding: 8, resource: tv(depth[2]) },
-            wgpu::BindGroupEntry { binding: 9, resource: tv(depth[3]) },
-            wgpu::BindGroupEntry { binding: 10, resource: tv(&converted.view) },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: tv(base.unwrap_or(o.dummy_texels_view)),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: tv(colour[0]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: tv(colour[1]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: tv(colour[2]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: tv(colour[3]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: tv(depth[0]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: tv(depth[1]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: tv(depth[2]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: tv(depth[3]),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: tv(&converted.view),
+            },
         ];
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("native convert"),
@@ -195,7 +263,12 @@ impl Converts {
             entries: &entries,
         });
         arenas.uniform_group()?;
-        Some(Ready { group, offset, groups: [w.div_ceil(8), h.div_ceil(8)], draw: converted.group.clone() })
+        Some(Ready {
+            group,
+            offset,
+            groups: [w.div_ceil(8), h.div_ceil(8)],
+            draw: converted.group.clone(),
+        })
     }
 
     /// The prepared conversions in one compute pass on `encoder` (no pass may be open on it), a
@@ -206,15 +279,25 @@ impl Converts {
     /// there, gone with the ten conversions of such a picture in four passes (finding 195). A
     /// dispatch reads surfaces and a decoded texture and writes its own converted texture, never
     /// another's.
-    pub fn dispatch(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, arenas: &Arenas, o: &ConvertObjects,
-                    ready: &[Ready]) {
-        let Some(uniforms) = arenas.uniform_group() else { return };
+    pub fn dispatch(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        arenas: &Arenas,
+        o: &ConvertObjects,
+        ready: &[Ready],
+    ) {
+        let Some(uniforms) = arenas.uniform_group() else {
+            return;
+        };
         if ready.is_empty() {
             return;
         }
         let times = gputimes::slot(gpu, gputimes::CONVERT);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: None, timestamp_writes: times.as_ref().map(gputimes::Slot::compute) });
+            label: None,
+            timestamp_writes: times.as_ref().map(gputimes::Slot::compute),
+        });
         pass.set_pipeline(o.pipeline);
         for r in ready {
             pass.set_bind_group(0, uniforms, &[r.offset]);

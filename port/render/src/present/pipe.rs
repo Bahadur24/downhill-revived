@@ -26,42 +26,53 @@ pub struct PresentPipe {
 /// The pipeline's descriptor parts: as gpu_wgpu.c's present_pipeline (automatic layout), into a
 /// `format` target.
 fn build(gpu: &Gpu, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-    let module = gpu.device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("present.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(crate::shaders::PRESENT.into()),
-    });
-    gpu.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("present"),
-        layout: None,
-        vertex: wgpu::VertexState {
-            module: &module,
-            entry_point: Some("present_vertex"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            buffers: &[],
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            ..Default::default()
-        },
-        depth_stencil: None,
-        multisample: wgpu::MultisampleState { count: 1, mask: !0, alpha_to_coverage_enabled: false },
-        fragment: Some(wgpu::FragmentState {
-            module: &module,
-            entry_point: Some("present_fragment"),
-            compilation_options: wgpu::PipelineCompilationOptions::default(),
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-        }),
-        multiview_mask: None,
-        cache: None,
-    })
+    let module = gpu
+        .device
+        .create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("present.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::PRESENT.into()),
+        });
+    gpu.device
+        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("present"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("present_vertex"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("present_fragment"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
 }
 
 impl PresentPipe {
-    fn finish(gpu: &Gpu, pipeline: wgpu::RenderPipeline, format: wgpu::TextureFormat) -> PresentPipe {
+    fn finish(
+        gpu: &Gpu,
+        pipeline: wgpu::RenderPipeline,
+        format: wgpu::TextureFormat,
+    ) -> PresentPipe {
         let layout = pipeline.get_bind_group_layout(0);
         let constants = gpu.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("present"),
@@ -69,7 +80,13 @@ impl PresentPipe {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        PresentPipe { format, pipeline, layout, constants, group: Mutex::new(None) }
+        PresentPipe {
+            format,
+            pipeline,
+            layout,
+            constants,
+            group: Mutex::new(None),
+        }
     }
 
     /// present.wgsl's pipeline into `format`, or None (logged) when the device can't build it.
@@ -86,7 +103,9 @@ impl PresentPipe {
     #[cfg(not(feature = "native"))]
     pub fn create(gpu: &Gpu, format: wgpu::TextureFormat) -> Option<PresentPipe> {
         let _ = (gpu, format);
-        crate::host::log("dhd_render: present pipeline: no blocking executor in this build (create_async)");
+        crate::host::log(
+            "dhd_render: present pipeline: no blocking executor in this build (create_async)",
+        );
         None
     }
 
@@ -100,8 +119,12 @@ impl PresentPipe {
         Self::checked(gpu, pipeline, error, format)
     }
 
-    fn checked(gpu: &Gpu, pipeline: wgpu::RenderPipeline, error: Option<wgpu::Error>, format: wgpu::TextureFormat)
-               -> Option<PresentPipe> {
+    fn checked(
+        gpu: &Gpu,
+        pipeline: wgpu::RenderPipeline,
+        error: Option<wgpu::Error>,
+        format: wgpu::TextureFormat,
+    ) -> Option<PresentPipe> {
         match error {
             None => Some(Self::finish(gpu, pipeline, format)),
             Some(e) => {
@@ -113,16 +136,28 @@ impl PresentPipe {
 
     /// Records the present pass: `source` drawn into `target` (cleared first). `constants` are the
     /// display's and the window's sizes; they are a queue write, so one draw per submit.
-    pub fn draw(&self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, source: &wgpu::TextureView,
-                target: &wgpu::TextureView, constants: [u32; 4]) {
+    pub fn draw(
+        &self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        source: &wgpu::TextureView,
+        target: &wgpu::TextureView,
+        constants: [u32; 4],
+    ) {
         let mut cache = self.group.lock().unwrap_or_else(|p| p.into_inner());
         if cache.as_ref().is_none_or(|(view, _)| view != source) {
             let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("present"),
                 layout: &self.layout,
                 entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(source) },
-                    wgpu::BindGroupEntry { binding: 1, resource: self.constants.as_entire_binding() },
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(source),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: self.constants.as_entire_binding(),
+                    },
                 ],
             });
             *cache = Some((source.clone(), group));
@@ -139,7 +174,10 @@ impl PresentPipe {
                 view: target,
                 depth_slice: None,
                 resolve_target: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,

@@ -25,6 +25,8 @@ typedef struct {
     /* this room's rejoin token from the welcome (hex; "" none yet): a rejoin's hello sends it back
        to get the member again (finding 137). client_init clears it for each new room. */
     char rejoin_token[65];
+    /* Only for a new LAN join; cleared after a successful welcome and never logged. */
+    char lan_pin[9];
     /* this game's install id (32 lowercase hex, "" none; finding 161), sent in every hello */
     char install_id[33];
     /* the room's welcome listed "race_go": it takes the race's start moment (finding 187) */
@@ -35,6 +37,7 @@ typedef struct {
        the transport rejoins; race frames are still sent. */
     int rejoining;
     unsigned rejoin_tries;  /* closes since the last welcome */
+    double reconnect_deadline_ms; /* LAN room's reconnect grace, local monotonic ms */
     /* the race this game is in, its start's startAt (server ms; 0 none), sent in a rejoin's hello;
        its finish or BACK, said again after a rejoin in case the drop lost it */
     double race_at;
@@ -104,6 +107,8 @@ double net_now_ms(void);  /* a monotonic clock */
 void client_init(NetClient *c, const char *name, const char *version, const char *iso);
 /* The install id for the hellos (finding 161): kept only when it is 32 lowercase hex digits. */
 void client_set_install_id(NetClient *c, const char *id);
+int client_set_lan_pin(NetClient *c, const char *pin); /* empty or 4-8 ASCII digits */
+int client_set_room_pin(NetClient *c, const char *pin); /* connected host's open LAN room only */
 void client_free(NetClient *c);
 /* The transport connected: hello goes out. */
 void client_connected(NetClient *c, const NetTransport *tr);
@@ -128,6 +133,7 @@ void client_finish(NetClient *c, unsigned ticks, int place);
 void client_back(NetClient *c);
 void client_rules(NetClient *c, int finish_window, int next_race, int then);
 void client_rotation(NetClient *c, const unsigned char *ids, int count);
+void client_check_connections(NetClient *c); /* host-only LAN WebSocket probe */
 /* The race's start moment this game named (server ms), to a room that takes it (finding 187). */
 void client_race_go(NetClient *c, double at);
 void client_leave(NetClient *c);  /* says so before the transport closes */

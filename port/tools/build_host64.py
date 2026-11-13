@@ -577,9 +577,15 @@ def main():
             # LLVM's lld: GNU ld on a tree under /mnt (WSL's 9p) took minutes, past the timeout;
             # lld links the same objects there in about 2 s
             run([cc, t.flags[0], '-pthread', '-rdynamic', '-fuse-ld=lld', '-Wl,--gc-sections', *pgo_flags[:1],
-                 *objects, library, report['lib'], sdl_lib, *sdl_libs, '-o', exe, *rust_libs, '-ldl', '-lm'],
+                *objects, library, report['lib'], sdl_lib, *sdl_libs, '-o', exe, *rust_libs, '-ldl', '-lm'],
                 timeout=900)
         step('link')
+        if t.key == 'linux-x64':
+            # Compiler and linker IDs live only in ELF's non-loaded .comment section.
+            objcopy = shutil.which('objcopy')
+            if not objcopy:
+                raise RuntimeError('objcopy (binutils) is needed to remove ELF .comment')
+            run([objcopy, '--remove-section=.comment', exe])
         (work/'failure.log').unlink(missing_ok=True)
         # how the module's C was split: package_release.py packages only a 'wasm2c' (--release) build
         (out/'split.txt').write_text(split + '\n')

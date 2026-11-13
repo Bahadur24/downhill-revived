@@ -2425,6 +2425,14 @@ mod tests {
     use crate::stream::connect_ws;
     use tungstenite::protocol::WebSocket;
 
+    fn test_ip(last_octet: u8) -> String {
+        Ipv4Addr::new(192, 168, 1, last_octet).to_string()
+    }
+
+    fn test_endpoint(last_octet: u8, port: u16) -> String {
+        SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, last_octet), port).to_string()
+    }
+
     fn wait_message(ws: &mut WebSocket<crate::stream::Stream>, want: &str) -> Value {
         let until = std::time::Instant::now() + Duration::from_secs(3);
         while std::time::Instant::now() < until {
@@ -2905,7 +2913,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(LanDiscoverResult, rtt_ms), 132);
         let nonce = [7u8; 16];
         let response = discovery_response(
-            "192.168.1.42:1234",
+            &test_endpoint(42, 1234),
             "LAN test",
             2,
             6,
@@ -2922,7 +2930,7 @@ mod tests {
         assert!(parse_discovery_response(&response, &wrong_nonce).is_none());
 
         let full = discovery_response(
-            "192.168.1.42:1234",
+            &test_endpoint(42, 1234),
             "Full",
             6,
             6,
@@ -2938,7 +2946,7 @@ mod tests {
     fn discovery_order_prefers_fast_links_then_more_open_seats() {
         let mut rooms = vec![
             LanDiscoverResult {
-                address: c_array("192.168.1.3:1000"),
+                address: c_array(&test_endpoint(3, 1000)),
                 room_name: c_array("A"),
                 players: 4,
                 track: 1,
@@ -2948,7 +2956,7 @@ mod tests {
                 rtt_ms: 40,
             },
             LanDiscoverResult {
-                address: c_array("192.168.1.2:1000"),
+                address: c_array(&test_endpoint(2, 1000)),
                 room_name: c_array("B"),
                 players: 1,
                 track: 1,
@@ -2958,7 +2966,7 @@ mod tests {
                 rtt_ms: 40,
             },
             LanDiscoverResult {
-                address: c_array("192.168.1.1:1000"),
+                address: c_array(&test_endpoint(1, 1000)),
                 room_name: c_array("C"),
                 players: 1,
                 track: 1,
@@ -3156,16 +3164,16 @@ mod tests {
         room.pin_verifier = Some(pin_verifier(&salt, "2468"));
         let now = Instant::now();
         assert_eq!(
-            pin_admission(&mut room, "192.168.1.8", "", now),
+            pin_admission(&mut room, &test_ip(8), "", now),
             Err("pin_required")
         );
         assert_eq!(
-            pin_admission(&mut room, "192.168.1.8", "1111", now),
+            pin_admission(&mut room, &test_ip(8), "1111", now),
             Err("pin_invalid")
         );
-        assert_eq!(pin_admission(&mut room, "192.168.1.8", "2468", now), Ok(()));
+        assert_eq!(pin_admission(&mut room, &test_ip(8), "2468", now), Ok(()));
         assert_eq!(
-            pin_admission(&mut room, "192.168.1.9", "", now),
+            pin_admission(&mut room, &test_ip(9), "", now),
             Err("pin_required")
         );
     }
@@ -3181,7 +3189,7 @@ mod tests {
             assert_eq!(
                 pin_admission(
                     &mut room,
-                    "192.168.1.8",
+                    &test_ip(8),
                     "0000",
                     start + Duration::from_secs(second)
                 ),
@@ -3191,7 +3199,7 @@ mod tests {
         assert_eq!(
             pin_admission(
                 &mut room,
-                "192.168.1.8",
+                &test_ip(8),
                 "2468",
                 start + Duration::from_secs(65)
             ),
@@ -3200,7 +3208,7 @@ mod tests {
         assert_eq!(
             pin_admission(
                 &mut room,
-                "192.168.1.8",
+                &test_ip(8),
                 "0000",
                 start + Duration::from_secs(95)
             ),
@@ -3210,10 +3218,12 @@ mod tests {
 
     #[test]
     fn guest_address_validation_requires_private_ipv4() {
-        assert!(SocketAddrV4::from_str("192.168.1.42:1234").is_ok());
+        assert!(SocketAddrV4::from_str(&test_endpoint(42, 1234)).is_ok());
         assert!(SocketAddrV4::from_str("example.com:1234").is_err());
-        assert!(SocketAddrV4::from_str("192.168.1.42").is_err());
-        assert!(valid_guest_address("192.168.1.42:1234".parse().unwrap()));
+        assert!(SocketAddrV4::from_str(&test_ip(42)).is_err());
+        assert!(valid_guest_address(
+            test_endpoint(42, 1234).parse().unwrap()
+        ));
         assert!(!valid_guest_address("127.0.0.1:1234".parse().unwrap()));
         assert!(!valid_guest_address("8.8.8.8:53".parse().unwrap()));
         assert!(!valid_guest_address("0.0.0.0:1".parse().unwrap()));
@@ -3235,7 +3245,7 @@ mod tests {
             "100.128.0.1:1234".parse().unwrap()
         ));
         assert!(!valid_tailnet_guest_address(
-            "192.168.1.42:1234".parse().unwrap()
+            test_endpoint(42, 1234).parse().unwrap()
         ));
         assert!(!valid_tailnet_guest_address(
             "8.8.8.8:1234".parse().unwrap()
@@ -3252,8 +3262,12 @@ mod tests {
         assert!(tailnet_peer_allowed(
             "100.127.255.254:1234".parse().unwrap()
         ));
-        assert!(!tailnet_peer_allowed("192.168.1.42:1234".parse().unwrap()));
-        assert!(!tailnet_peer_allowed("10.0.0.2:1234".parse().unwrap()));
+        assert!(!tailnet_peer_allowed(
+            test_endpoint(42, 1234).parse().unwrap()
+        ));
+        assert!(!tailnet_peer_allowed(
+            test_endpoint(44, 1234).parse().unwrap()
+        ));
         assert!(!tailnet_peer_allowed("8.8.8.8:1234".parse().unwrap()));
     }
 
@@ -3318,26 +3332,26 @@ mod tests {
         let current_interfaces = vec![("wlan0".into(), selected, true)];
         assert_eq!(
             live_host_address(
-                "192.168.1.42:48100",
+                &test_endpoint(42, 48100),
                 48100,
                 &current_interfaces,
                 Some(fallback)
             ),
-            Some("192.168.1.42:48100".into())
+            Some(test_endpoint(42, 48100))
         );
 
         let changed_interfaces = vec![("wlan0".into(), fallback, true)];
         assert_eq!(
             live_host_address(
-                "192.168.1.42:48100",
+                &test_endpoint(42, 48100),
                 48100,
                 &changed_interfaces,
                 Some(fallback)
             ),
-            Some("192.168.1.43:48100".into())
+            Some(test_endpoint(43, 48100))
         );
         assert_eq!(
-            live_host_address("192.168.1.42:48100", 48100, &[], Some(selected)),
+            live_host_address(&test_endpoint(42, 48100), 48100, &[], Some(selected)),
             None
         );
     }

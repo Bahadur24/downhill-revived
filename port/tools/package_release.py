@@ -891,6 +891,7 @@ def main():
     ap.add_argument('--out', type=Path, help='default build/release/DownhillRevived-<version>-<platform>.zip')
     ap.add_argument('--base-url', help="latest.json's zip address is this + the zip's name (default: the GitHub "
                     "release asset of tag v<version>), for a self-hosted update source")
+    ap.add_argument('--page-url', help="latest.json's release page (default: the upstream tag page; use this for a fork)")
     ap.add_argument('--merge', type=Path, nargs='+', metavar='LATEST_JSON',
                     help="only add these latest.json files' platforms (same version) to the one beside --out")
     ap.add_argument('--settings', type=Path, help="a dhd.ini whose server line must not be in the package")
@@ -923,7 +924,7 @@ def main():
     if (ROOT / 'build').resolve() not in out.parents or out.drive.upper() == 'C:':
         sys.exit('the zip goes under build/ (never tracked, never on C:)')
     manifest_path = out.with_name('latest.json')
-    page = '%s/tag/v%s' % (RELEASES, a.version)
+    page = a.page_url or '%s/tag/v%s' % (RELEASES, a.version)
     if a.merge:
         for other in a.merge:
             m = json.loads(other.read_text(encoding='utf-8'))

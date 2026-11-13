@@ -245,8 +245,9 @@ def c_tools(triple):
                 'CFLAGS_' + var: '-g0'}
     if triple in (LINUX, MAC) and os.name != 'nt':
         # the machine's own compiler (cc finds it; Apple's through xcrun, with the SDK ring needs),
-        # without debug info: ring asks for -g3, whose DWARF names the registry and the target dir
-        return {'CFLAGS_' + var: '-g0'}
+        # without debug info: ring asks for -g3, whose DWARF names the registry and the target dir.
+        # Omit the compiler-identification comment: distro labels there can trip the host-marker check.
+        return {'CFLAGS_' + var: '-g0 -fno-ident'}
     if triple == LINUX:
         # cross-built on Windows: LLVM's clang for the target, freestanding (no Linux headers here:
         # ring's C has a mode for that), without debug info (ring asks for -g3)

@@ -14,8 +14,8 @@ What you need
   WebKitGTK 4.1 from your distribution: libwebkit2gtk-4.1-0, already there with GNOME).
   The Mac and Linux builds are experimental: they may have problems the Windows build doesn't.
   Please report them with your dhd.log.
-  There is also an experimental Android build (an .apk on the release page); its online play is
-  P2P races only (below).
+  The project also has an experimental Android build, but a fork release may omit its APK; check
+  the release notes. Android's Wi-Fi LAN and Tailscale rooms are separate from online P2P races.
 - Speed: about 60 fps at 1x-2x needs a 4-thread CPU from about 2016 and integrated graphics such
   as Intel UHD 620 or AMD Vega 8 with 4 GB RAM; 4x and up wants a 6-core CPU and a GTX 1060 /
   RX 580 class card or better. On Android: a Helio G80 / Snapdragon 680 class phone with 4 GB RAM,
@@ -160,8 +160,11 @@ itself with the new release's AppImage.
 In dhd.ini:
     auto_update = ask    ask before updating (the default); on: update without asking;
                          off: never look
-    update_url =         where to look; empty means the official releases on GitHub. It can
-                         name a latest.json of your own (version, url of the zip, its sha256).
+    update_url =         where to look; empty means the original upstream GitHub releases. This
+                         fork's launcher still defaults to upstream. To follow this fork instead,
+                         set update_url to:
+                         https://github.com/Bahadur24/downhill-revived/releases/latest/download/latest.json
+                         The fork release page is the source of the supported assets for this build.
 
 Online races (experimental)
 Choose ONLINE in the main menu: create a public or private race, or join one from the list or

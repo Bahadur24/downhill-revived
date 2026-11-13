@@ -40,6 +40,15 @@ between the players' games, so **the other players in a P2P room can see your ne
 address**; the game says so. Play them with people you trust. Public races, Quick Race and the
 normal private races are not on phones yet.
 
+**Wi-Fi LAN and Tailscale rooms.** These are separate from online P2P races. For Wi-Fi LAN, host
+or join while both devices are on the same Wi-Fi network. The join screen searches for open rooms;
+if discovery does not work, refresh or enter the host's private IPv4 address and port manually.
+For a room over Tailscale, both devices need Tailscale connected to the same tailnet, and its ACLs
+must allow the room's TCP connection. The host enters their Tailscale IPv4 address in
+`100.64.0.0/10`; the game displays an `IP:port` for the guest to enter. The port is chosen at
+runtime and may change for another room. The game does not discover Tailscale peers automatically.
+Wi-Fi LAN discovery and two-device Tailscale play have not been verified on physical devices.
+
 **Check the download.** `SHA256SUMS` lists the APK's SHA-256. The APK is signed with the
 Downhill Revived release key, certificate SHA-256
 `D7:61:3E:E0:F0:93:95:22:D8:3B:06:CE:8A:05:ED:9D:03:E4:A9:96:8E:EA:2F:9C:83:98:58:94:14:56:AE:1B`
